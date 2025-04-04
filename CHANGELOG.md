@@ -1,4 +1,4 @@
-# 0.1.1 (unreleased)
+# 0.1.1
 
 - When merging dictionaries, never replace values with "null"
 
