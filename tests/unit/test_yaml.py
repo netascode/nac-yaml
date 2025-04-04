@@ -50,6 +50,18 @@ def test_merge_dict() -> None:
     result: dict[Any, Any] = {"e1": "abc", "e2": "def"}
     yaml.merge_dict(source, destination)
     assert destination == result
+    # merge empty destination dict
+    destination = {"e1": None}
+    source = {"e1": "abc"}
+    result = {"e1": "abc"}
+    yaml.merge_dict(source, destination)
+    assert destination == result
+    # merge empty source dict
+    destination = {"e1": "abc"}
+    source = {"e1": None}
+    result = {"e1": "abc"}
+    yaml.merge_dict(source, destination)
+    assert destination == result
     # merge nested dicts
     destination = {"root": {"child1": "abc"}}
     source = {"root": {"child2": "def"}}

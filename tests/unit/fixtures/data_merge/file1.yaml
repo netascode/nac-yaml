@@ -7,3 +7,4 @@ root:
   dict_list:
     - name: abc
       extra1: def
+root1: value1

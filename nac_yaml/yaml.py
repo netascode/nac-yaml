@@ -129,7 +129,7 @@ def merge_dict(source: dict[str, Any], destination: dict[str, Any]) -> dict[str,
         elif isinstance(value, list):
             if isinstance(destination[key], list):
                 destination[key] += value
-        else:
+        elif value is not None:
             destination[key] = value
     return destination
 

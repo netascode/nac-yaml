@@ -11,3 +11,5 @@ root:
     - name: abc
       extra2: ghi
   attr2: value2
+root1: value1
+root2: value2

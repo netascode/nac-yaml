@@ -6,3 +6,4 @@ root:
   dict_list:
     - name: abc
       extra2: ghi
+root2: value2
