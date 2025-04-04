@@ -121,7 +121,7 @@ def merge_dict(source: dict[str, Any], destination: dict[str, Any]) -> dict[str,
     if not source:
         return destination
     for key, value in source.items():
-        if key not in destination:
+        if key not in destination or destination[key] is None:
             destination[key] = value
         elif isinstance(value, dict):
             if isinstance(destination[key], dict):
