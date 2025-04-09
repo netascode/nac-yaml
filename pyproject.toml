@@ -8,7 +8,7 @@ maintainers = ["Daniel Schmidt <danischm@cisco.com>"]
 name = "nac-yaml"
 readme = "README.md"
 repository = "https://github.com/netascode/nac-yaml"
-version = "0.1.2"
+version = "0.1.3"
 
 [tool.poetry.dependencies]
 python = "~=3.10"

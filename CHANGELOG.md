@@ -1,4 +1,4 @@
-# 0.1.3 (unreleased)
+# 0.1.3
 
 - BREAKING CHANGE: Update YAML merge logic to not merge list items with matching attributes and primitive values, if both have additional attributes the other does not have
 
