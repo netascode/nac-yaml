@@ -161,7 +161,7 @@ def test_merge_list_item() -> None:
     # do not merge matching dict list items with extra dst and src primitive attribute
     destination = [{"name": "abc", "name2": "def"}]
     source_item = {"name": "abc", "name3": "ghi"}
-    result = [{"name": "abc", "name2": "def"},{"name": "abc", "name3": "ghi"}]
+    result = [{"name": "abc", "name2": "def"}, {"name": "abc", "name3": "ghi"}]
     yaml.merge_list_item(source_item, destination)
     assert destination == result
 
