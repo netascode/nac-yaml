@@ -98,19 +98,27 @@ def merge_list_item(source_item: Any, destination: list[Any]) -> None:
         for dest_item in destination:
             match = True
             comparison = False
+            unique_source = False
+            unique_dest = False
             for k, v in source_item.items():
-                if isinstance(v, dict) or isinstance(v, list) or k not in dest_item:
+                if isinstance(v, dict) or isinstance(v, list):
+                    continue
+                if k not in dest_item:
+                    unique_source = True
                     continue
                 comparison = True
                 if v != dest_item[k]:
                     match = False
             for k, v in dest_item.items():
-                if isinstance(v, dict) or isinstance(v, list) or k not in source_item:
+                if isinstance(v, dict) or isinstance(v, list):
+                    continue
+                if k not in source_item:
+                    unique_dest = True
                     continue
                 comparison = True
                 if v != source_item[k]:
                     match = False
-            if comparison and match:
+            if comparison and match and not (unique_source and unique_dest):
                 merge_dict(source_item, dest_item)
                 return
     destination.append(source_item)
