@@ -1,16 +1,13 @@
-# -*- coding: utf-8 -*-
-
 # Copyright: (c) 2025, Daniel Schmidt <danischm@cisco.com>
 
-import pytest
 import filecmp
 import os
+from pathlib import Path
+from typing import Any
+
+import pytest
 
 from nac_yaml import yaml
-
-from pathlib import Path
-
-from typing import Any
 
 pytestmark = pytest.mark.unit
 

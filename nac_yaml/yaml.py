@@ -1,13 +1,11 @@
-# -*- coding: utf-8 -*-
-
 # Copyright: (c) 2025, Daniel Schmidt <danischm@cisco.com>
 
 import importlib.util
 import logging
 import os
-import subprocess
-from typing import Any
+import subprocess  # nosec B404
 from pathlib import Path
+from typing import Any
 
 from ruamel import yaml
 
@@ -27,7 +25,7 @@ class VaultTag(yaml.YAMLObject):
                 vault_id = os.environ["ANSIBLE_VAULT_ID"] + "@" + str(spec.origin)
             else:
                 vault_id = str(spec.origin)
-            t = subprocess.check_output(
+            t = subprocess.check_output(  # nosec B603, B607
                 [
                     "ansible-vault",
                     "decrypt",
@@ -65,7 +63,7 @@ def load_yaml_files(paths: list[Path], deduplicate: bool = True) -> dict[str, An
     """Load all yaml files from a provided directory."""
 
     def _load_file(file_path: Path, data: dict[str, Any]) -> None:
-        with open(file_path, "r") as file:
+        with open(file_path) as file:
             if file_path.suffix in [".yaml", ".yml"]:
                 data_yaml = file.read()
                 y = yaml.YAML()
@@ -80,12 +78,12 @@ def load_yaml_files(paths: list[Path], deduplicate: bool = True) -> dict[str, An
         if os.path.isfile(path):
             _load_file(path, result)
         else:
-            for dir, subdir, files in os.walk(path):
+            for dir, _subdir, files in os.walk(path):
                 for filename in files:
                     try:
                         _load_file(Path(dir, filename), result)
                     except:  # noqa: E722
-                        logger.warning("Could not load file: {}".format(filename))
+                        logger.warning(f"Could not load file: {filename}")
     if deduplicate:
         result = deduplicate_list_items(result)
     return result
@@ -167,4 +165,4 @@ def write_yaml_file(data: dict[str, Any], path: Path) -> None:
             y.indent(mapping=2, sequence=4, offset=2)
             y.dump(data, fh)
     except:  # noqa: E722
-        logger.error("Cannot write file: {}".format(path))
+        logger.error(f"Cannot write file: {path}")

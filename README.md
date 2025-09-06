@@ -4,3 +4,17 @@
 # nac-yaml
 
 A Python library with common YAML utility functions supporting `Network as Code`.
+
+## Installation
+
+### Using uv (recommended)
+
+```bash
+uv add nac-yaml
+```
+
+### Using pip
+
+```bash
+pip install nac-yaml
+```

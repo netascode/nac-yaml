@@ -1,24 +1,50 @@
-[tool.poetry]
-authors = ["Daniel Schmidt <danischm@cisco.com>"]
-description = "A Python library with common YAML utility functions supporting 'Network as Code'."
-documentation = "https://github.com/netascode/nac-yaml"
-homepage = "https://github.com/netascode/nac-yaml"
-license = "LICENSE"
-maintainers = ["Daniel Schmidt <danischm@cisco.com>"]
+[project]
 name = "nac-yaml"
-readme = "README.md"
-repository = "https://github.com/netascode/nac-yaml"
 version = "1.0.0"
+description = "A Python library with common YAML utility functions supporting 'Network as Code'."
+license = { text = "MPL-2.0" }
+readme = "README.md"
+authors = [
+    { name = "Daniel Schmidt", email = "danischm@cisco.com" },
+]
+maintainers = [
+    { name = "Daniel Schmidt", email = "danischm@cisco.com" },
+]
+requires-python = ">=3.10"
+keywords = ["yaml", "network", "automation", "cisco", "utilities"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "ruamel.yaml>=0.18.15",
+]
 
-[tool.poetry.dependencies]
-python = "~=3.10"
-ruamel-yaml = "~=0.16"
+[project.urls]
+homepage = "https://github.com/netascode/nac-yaml"
+repository = "https://github.com/netascode/nac-yaml"
+documentation = "https://github.com/netascode/nac-yaml"
 
-[tool.poetry.group.dev.dependencies]
-ansible-core = "~=2.17"
-pytest = "~=8.2"
-pytest-cov = "~=6.0"
-pytest-mock = "~=3.14"
+[project.optional-dependencies]
+dev = [
+    "ansible-core>=2.17.6",
+    "bandit[toml]>=1.8.6",
+    "mypy>=1.17.1",
+    "pre-commit>=4.3.0",
+    "pytest>=8.4.2",
+    "pytest-cov>=6.2.1",
+    "pytest-mock>=3.15.0",
+    "ruff>=0.12.12",
+]
 
 [tool.coverage.run]
 source = ["nac_yaml"]
@@ -43,10 +69,40 @@ warn_redundant_casts = true
 warn_return_any = true
 warn_unused_configs = true
 warn_unused_ignores = false
+warn_unreachable = true
+show_error_context = true
 
 [tool.pytest.ini_options]
 markers = ["unit", "integration"]
 
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings  
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nac_yaml"]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = ["B101"]  # Skip assert_used test
+
 [build-system]
-build-backend = "poetry.core.masonry.api"
-requires = ["poetry_core"]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
