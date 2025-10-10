@@ -1,3 +1,7 @@
+# 1.1.1 (unreleased)
+
+- Reverted changes to `ansible_vault.py` to maintain backwards compatibility
+
 # 1.1.0
 
 - Migrate to `uv` package manager
