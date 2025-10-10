@@ -1,4 +1,4 @@
-# 1.1.0 (unreleased)
+# 1.1.0
 
 - Migrate to `uv` package manager
 - Update license references
