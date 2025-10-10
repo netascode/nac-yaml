@@ -1,4 +1,4 @@
-# 1.1.1 (unreleased)
+# 1.1.1
 
 - Reverted changes to `ansible_vault.py` to maintain backwards compatibility
 
