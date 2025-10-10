@@ -52,6 +52,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      - name: Check License Headers
+        run: bash scripts/license-headers.sh
+
       - name: Pre-commit Checks
         run: uv run pre-commit run --all-files
 
