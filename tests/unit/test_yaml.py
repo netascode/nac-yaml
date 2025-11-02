@@ -222,8 +222,6 @@ def test_merge_list_item(
         "do_not_deduplicate_string_list_items",
     ],
 )
-def test_deduplicate_list_items(
-    data: dict[Any, Any], expected: dict[Any, Any]
-) -> None:
+def test_deduplicate_list_items(data: dict[Any, Any], expected: dict[Any, Any]) -> None:
     yaml.deduplicate_list_items(data)
     assert data == expected
