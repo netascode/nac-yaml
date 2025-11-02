@@ -77,3 +77,4 @@ tmp/
 .mypy_cache/
 
 logs/
+.claude/
