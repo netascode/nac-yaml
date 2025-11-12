@@ -78,17 +78,23 @@ def test_merge_dict() -> None:
     result = {"root": {"child1": "abc", "child2": "def"}}
     yaml.merge_dict(source, destination)
     assert destination == result
-    # append when merging lists
+    # append when merging lists with deduplicate=False
     destination = {"list": [{"child1": "abc"}]}
     source = {"list": [{"child2": "def"}]}
     result = {"list": [{"child1": "abc"}, {"child2": "def"}]}
-    yaml.merge_dict(source, destination)
+    yaml.merge_dict(source, destination, deduplicate=False)
     assert destination == result
-    # append when merging lists with duplicate items
+    # append when merging lists with duplicate items (deduplicate=False)
     destination = {"list": [{"child1": "abc"}]}
     source = {"list": [{"child1": "abc"}]}
     result = {"list": [{"child1": "abc"}, {"child1": "abc"}]}
-    yaml.merge_dict(source, destination)
+    yaml.merge_dict(source, destination, deduplicate=False)
+    assert destination == result
+    # merge when deduplicating lists (deduplicate=True, new default)
+    destination = {"list": [{"child1": "abc"}]}
+    source = {"list": [{"child1": "abc", "child2": "def"}]}
+    result = {"list": [{"child1": "abc", "child2": "def"}]}
+    yaml.merge_dict(source, destination, deduplicate=True)
     assert destination == result
     # make sure that the code doesn't hang when merging lists of lists
     source = {
@@ -156,10 +162,10 @@ def test_merge_list_item() -> None:
     ]
     yaml.merge_list_item(source_item, destination)
     assert destination == result
-    # do not merge matching dict list items with extra dst and src primitive attribute
+    # merge matching dict list items even when both have unique primitive attributes
     destination = [{"name": "abc", "name2": "def"}]
     source_item = {"name": "abc", "name3": "ghi"}
-    result = [{"name": "abc", "name2": "def"}, {"name": "abc", "name3": "ghi"}]
+    result = [{"name": "abc", "name2": "def", "name3": "ghi"}]
     yaml.merge_list_item(source_item, destination)
     assert destination == result
 
