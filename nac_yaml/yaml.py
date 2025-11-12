@@ -187,15 +187,16 @@ def load_yaml_files(paths: list[Path], deduplicate: bool = True) -> dict[str, An
 
         Result: devices: [{name: switch1}, {name: switch1}, {name: switch1, port: 1/0/1}]  # all preserved
     """
+    # Create YAML parser once and reuse for all files
+    y = yaml.YAML()
+    y.preserve_quotes = True
+    y.register_class(VaultTag)
+    y.register_class(EnvTag)
 
     def _load_file(file_path: Path, data: dict[str, Any]) -> None:
         with open(file_path) as file:
             if file_path.suffix in [".yaml", ".yml"]:
                 data_yaml = file.read()
-                y = yaml.YAML()
-                y.preserve_quotes = True
-                y.register_class(VaultTag)
-                y.register_class(EnvTag)
                 dict = y.load(data_yaml)
                 merge_dict(dict, data, deduplicate)
 
@@ -228,26 +229,19 @@ def _items_would_merge(item1: dict[str, Any], item2: dict[str, Any]) -> bool:
         - All shared primitive values must match exactly
         - Ignores dict and list fields for matching
     """
-    match = True
-    comparison = False
+    # Extract primitive keys using set comprehension
+    keys1 = {k for k, v in item1.items() if not isinstance(v, dict | list)}
+    keys2 = {k for k, v in item2.items() if not isinstance(v, dict | list)}
 
-    # Check item1 primitive fields against item2
-    for k, v in item1.items():
-        if isinstance(v, dict | list) or k not in item2:
-            continue
-        comparison = True
-        if v != item2[k]:
-            match = False
+    # Find shared primitive keys (set intersection)
+    shared_keys = keys1 & keys2
 
-    # Check item2 primitive fields against item1
-    for k, v in item2.items():
-        if isinstance(v, dict | list) or k not in item1:
-            continue
-        comparison = True
-        if v != item1[k]:
-            match = False
+    # No shared primitive keys means no comparison possible
+    if not shared_keys:
+        return False
 
-    return comparison and match
+    # Check if all shared values match (short-circuits on first mismatch)
+    return all(item1[k] == item2[k] for k in shared_keys)
 
 
 def _has_duplicates_in_list(items: list[Any]) -> bool:
@@ -368,9 +362,12 @@ def merge_dict(
         elif isinstance(value, list):
             if isinstance(destination[key], list):
                 if deduplicate:
+                    # Skip empty lists
+                    if not value or not destination[key]:
+                        destination[key] += value
                     # Check if either source or destination list has duplicates
                     # If duplicates exist, skip merging to preserve them
-                    if _has_duplicates_in_list(value) or _has_duplicates_in_list(
+                    elif _has_duplicates_in_list(value) or _has_duplicates_in_list(
                         destination[key]
                     ):
                         # Concatenate without merging to preserve all duplicates
