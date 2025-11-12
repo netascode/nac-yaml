@@ -213,6 +213,43 @@ def load_yaml_files(paths: list[Path], deduplicate: bool = True) -> dict[str, An
     return result
 
 
+def _items_would_merge(item1: dict[str, Any], item2: dict[str, Any]) -> bool:
+    """Check if two dict items would merge based on primitive field matching.
+
+    Args:
+        item1: First dict item
+        item2: Second dict item
+
+    Returns:
+        True if items would merge (all shared primitives match), False otherwise
+
+    Matching logic:
+        - At least one primitive (non-dict, non-list) key must exist in both items
+        - All shared primitive values must match exactly
+        - Ignores dict and list fields for matching
+    """
+    match = True
+    comparison = False
+
+    # Check item1 primitive fields against item2
+    for k, v in item1.items():
+        if isinstance(v, dict | list) or k not in item2:
+            continue
+        comparison = True
+        if v != item2[k]:
+            match = False
+
+    # Check item2 primitive fields against item1
+    for k, v in item2.items():
+        if isinstance(v, dict | list) or k not in item1:
+            continue
+        comparison = True
+        if v != item1[k]:
+            match = False
+
+    return comparison and match
+
+
 def _has_duplicates_in_list(items: list[Any]) -> bool:
     """Check if a list contains duplicate dict items using merge matching logic.
 
@@ -234,26 +271,7 @@ def _has_duplicates_in_list(items: list[Any]) -> bool:
     # Check each dict against all subsequent dicts
     for i, source_item in enumerate(dict_items):
         for dest_item in dict_items[i + 1 :]:
-            # Use same matching logic as merge_list_item
-            match = True
-            comparison = False
-
-            for k, v in source_item.items():
-                if isinstance(v, dict | list) or k not in dest_item:
-                    continue
-                comparison = True
-                if v != dest_item[k]:
-                    match = False
-
-            for k, v in dest_item.items():
-                if isinstance(v, dict | list) or k not in source_item:
-                    continue
-                comparison = True
-                if v != source_item[k]:
-                    match = False
-
-            # If these two items would merge, we have a duplicate
-            if comparison and match:
+            if _items_would_merge(source_item, dest_item):
                 return True
 
     return False
@@ -296,24 +314,9 @@ def merge_list_item(
     if isinstance(source_item, dict):
         # check if we have an item in destination with matching primitives
         for dest_item in destination:
-            match = True
-            comparison = False
-
-            for k, v in source_item.items():
-                if isinstance(v, dict | list) or k not in dest_item:
-                    continue
-                comparison = True
-                if v != dest_item[k]:
-                    match = False
-
-            for k, v in dest_item.items():
-                if isinstance(v, dict | list) or k not in source_item:
-                    continue
-                comparison = True
-                if v != source_item[k]:
-                    match = False
-
-            if comparison and match:
+            if isinstance(dest_item, dict) and _items_would_merge(
+                source_item, dest_item
+            ):
                 merge_dict(source_item, dest_item, deduplicate)
                 return
     destination.append(source_item)
