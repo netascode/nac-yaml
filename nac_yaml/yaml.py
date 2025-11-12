@@ -384,45 +384,6 @@ def merge_dict(
     return destination
 
 
-def deduplicate_list_items(data: dict[str, Any]) -> dict[str, Any]:
-    """Recursively deduplicate list items in a nested data structure.
-
-    Args:
-        data: Dictionary containing nested dicts and lists
-
-    Returns:
-        The modified data dictionary with deduplicated lists
-
-    Behavior:
-        - Traverses all nested dictionaries recursively
-        - For each list, merges matching dict items using merge_list_item logic
-        - Preserves order (first occurrence wins)
-        - Primitive list items (strings, numbers) are NOT deduplicated
-        - Dict items match based on shared primitive key-value pairs
-
-    Note:
-        This function is kept for backward compatibility. New code should use
-        load_yaml_files() with deduplicate=True for cross-file deduplication.
-
-    Example:
-        data = {"devices": [{"name": "a", "x": 1}, {"name": "a", "y": 2}]}
-        deduplicate_list_items(data)
-        # Result: {"devices": [{"name": "a", "x": 1, "y": 2}]}
-    """
-    for key, value in data.items():
-        if isinstance(value, dict):
-            deduplicate_list_items(value)
-        elif isinstance(value, list):
-            deduplicated_list: list[Any] = []
-            for i in value:
-                merge_list_item(i, deduplicated_list)
-            for i in deduplicated_list:
-                if isinstance(i, dict):
-                    deduplicate_list_items(i)
-            data[key] = deduplicated_list
-    return data
-
-
 def write_yaml_file(data: dict[str, Any], path: Path) -> None:
     """Write data structure to a YAML file with standard formatting.
 

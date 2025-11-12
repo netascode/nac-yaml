@@ -168,21 +168,3 @@ def test_merge_list_item() -> None:
     result = [{"name": "abc", "name2": "def", "name3": "ghi"}]
     yaml.merge_list_item(source_item, destination)
     assert destination == result
-
-
-def test_deduplicate_list_items() -> None:
-    # deduplicate dict list items
-    data: dict[Any, Any] = {"list": [{"name": "abc"}, {"name": "abc"}]}
-    result: dict[Any, Any] = {"list": [{"name": "abc"}]}
-    yaml.deduplicate_list_items(data)
-    assert data == result
-    # deduplicate nested dict list items
-    data = {"list": [{"nested_list": [{"name": "abc"}, {"name": "abc"}]}]}
-    result = {"list": [{"nested_list": [{"name": "abc"}]}]}
-    yaml.deduplicate_list_items(data)
-    assert data == result
-    # do not deduplicate string list items
-    data = {"list": ["abc", "abc"]}
-    result = {"list": ["abc", "abc"]}
-    yaml.deduplicate_list_items(data)
-    assert data == result
