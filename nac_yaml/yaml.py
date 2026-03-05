@@ -244,8 +244,20 @@ def _items_would_merge(item1: dict[str, Any], item2: dict[str, Any]) -> bool:
     return all(item1[k] == item2[k] for k in shared_keys)
 
 
+def _extract_primitives(item: dict[str, Any]) -> dict[str, Any]:
+    """Extract primitive (non-dict, non-list) key-value pairs from a dict.
+
+    Args:
+        item: Dictionary to extract primitives from
+
+    Returns:
+        Dictionary containing only primitive key-value pairs
+    """
+    return {k: v for k, v in item.items() if not isinstance(v, dict | list)}
+
+
 def _has_duplicates_in_list(items: list[Any]) -> bool:
-    """Check if a list contains duplicate dict items using merge matching logic.
+    """Check if a list contains duplicate dict items using an inverted index.
 
     Args:
         items: List to check for duplicates
@@ -257,18 +269,131 @@ def _has_duplicates_in_list(items: list[Any]) -> bool:
         Uses same matching logic as merge_list_item() to determine if items are duplicates.
         Primitive items (strings, numbers) are not considered for duplicate detection.
     """
-    # Only check dict items for duplicates
-    dict_items = [item for item in items if isinstance(item, dict)]
+    # Only check dict items for duplicates, precompute primitives
+    dict_items: list[dict[str, Any]] = []
+    primitives_list: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict):
+            dict_items.append(item)
+            primitives_list.append(_extract_primitives(item))
+
     if len(dict_items) < 2:
         return False
 
-    # Check each dict against all subsequent dicts
-    for i, source_item in enumerate(dict_items):
-        for dest_item in dict_items[i + 1 :]:
-            if _items_would_merge(source_item, dest_item):
-                return True
+    # Build inverted index: (key, value) -> [indices]
+    index: dict[tuple[str, Any], list[int]] = {}
+    for i, prims in enumerate(primitives_list):
+        for k, v in prims.items():
+            try:
+                kv = (k, v)
+                hash(kv)
+            except TypeError:
+                continue
+            index.setdefault(kv, []).append(i)
+
+    # Check candidate pairs from buckets with 2+ entries
+    checked: set[tuple[int, int]] = set()
+    for bucket in index.values():
+        if len(bucket) < 2:
+            continue
+        for bi in range(len(bucket)):
+            for bj in range(bi + 1, len(bucket)):
+                idx_pair = (bucket[bi], bucket[bj])
+                if idx_pair in checked:
+                    continue
+                checked.add(idx_pair)
+                i, j = idx_pair
+                # Intersect primitive key sets, verify all shared keys match
+                shared_keys = primitives_list[i].keys() & primitives_list[j].keys()
+                if not shared_keys:
+                    continue
+                if all(
+                    primitives_list[i][k] == primitives_list[j][k] for k in shared_keys
+                ):
+                    return True
 
     return False
+
+
+def _merge_list_items_indexed(
+    source_items: list[Any], destination: list[Any], deduplicate: bool
+) -> None:
+    """Merge source items into destination list using an inverted index.
+
+    Args:
+        source_items: List of items to merge into destination
+        destination: Target list (modified in-place)
+        deduplicate: When True, merges matching dict items
+    """
+    # Build inverted index over destination's dict items
+    dest_primitives: list[dict[str, Any] | None] = []
+    for item in destination:
+        if isinstance(item, dict):
+            dest_primitives.append(_extract_primitives(item))
+        else:
+            dest_primitives.append(None)
+
+    index: dict[tuple[str, Any], list[int]] = {}
+    for i, prims in enumerate(dest_primitives):
+        if prims is None:
+            continue
+        for k, v in prims.items():
+            try:
+                pair = (k, v)
+                hash(pair)
+            except TypeError:
+                continue
+            index.setdefault(pair, []).append(i)
+
+    for source_item in source_items:
+        if not isinstance(source_item, dict):
+            destination.append(source_item)
+            continue
+
+        src_prims = _extract_primitives(source_item)
+        if not src_prims:
+            destination.append(source_item)
+            continue
+
+        # Collect candidate dest indices
+        candidate_set: set[int] = set()
+        for k, v in src_prims.items():
+            try:
+                pair = (k, v)
+                hash(pair)
+            except TypeError:
+                continue
+            if pair in index:
+                candidate_set.update(index[pair])
+
+        # Check candidates in destination order (first-match semantics)
+        matched = False
+        for ci in sorted(candidate_set):
+            dp = dest_primitives[ci]
+            if dp is None:
+                continue
+            shared_keys = src_prims.keys() & dp.keys()
+            if not shared_keys:
+                continue
+            if all(src_prims[k] == dp[k] for k in shared_keys):
+                merge_dict(source_item, destination[ci], deduplicate)
+                # Update primitives cache after merge
+                dest_primitives[ci] = _extract_primitives(destination[ci])
+                matched = True
+                break
+
+        if not matched:
+            # Append and update index so later source items can match
+            new_idx = len(destination)
+            destination.append(source_item)
+            dest_primitives.append(src_prims)
+            for k, v in src_prims.items():
+                try:
+                    pair = (k, v)
+                    hash(pair)
+                except TypeError:
+                    continue
+                index.setdefault(pair, []).append(new_idx)
 
 
 def merge_list_item(
@@ -374,8 +499,7 @@ def merge_dict(
                         destination[key] += value
                     else:
                         # No duplicates: merge matching items across files
-                        for item in value:
-                            merge_list_item(item, destination[key], deduplicate)
+                        _merge_list_items_indexed(value, destination[key], deduplicate)
                 else:
                     # Simple append (original behavior)
                     destination[key] += value
