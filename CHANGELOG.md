@@ -1,3 +1,7 @@
+# Unreleased
+
+- Add support for Python 3.14
+
 # 1.1.1
 
 - Reverted changes to `ansible_vault.py` to maintain backwards compatibility
