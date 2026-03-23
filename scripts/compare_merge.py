@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["ruamel.yaml"]
+# ///
 """Compare YAML merge output between nac-yaml v1.1.1 and v2.0.0a0.
 
 nac-yaml v2.0.0a0 changed the merge logic for load_yaml_files:
