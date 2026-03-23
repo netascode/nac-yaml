@@ -418,21 +418,6 @@ def _format_yaml_item(item: Any, indent: int = 0) -> list[str]:
     return [f"{prefix}- {_format_yaml_value(item)}"]
 
 
-def _format_yaml_list(items: list[Any]) -> list[str]:
-    """Render a list as YAML-style lines.
-
-    Args:
-        items: List of items to format.
-
-    Returns:
-        List of formatted YAML lines.
-    """
-    lines: list[str] = []
-    for item in items:
-        lines.extend(_format_yaml_item(item))
-    return lines
-
-
 def _format_side_by_side(
     left: list[str], right: list[str], col_width: int = 38
 ) -> list[str]:
@@ -453,6 +438,107 @@ def _format_side_by_side(
         r_line = right[i] if i < len(right) else ""
         result.append(f"  {l_line:<{col_width}} {r_line}")
     return result
+
+
+def _primitives(item: Any) -> dict[str, Any] | None:
+    """Extract primitive (non-dict, non-list) key-value pairs from a dict item.
+
+    Args:
+        item: A list element.
+
+    Returns:
+        Dict of primitive fields, or None for non-dict items.
+    """
+    if isinstance(item, dict):
+        return {
+            k: v
+            for k, v in item.items()
+            if not isinstance(v, (dict, list))  # noqa: UP038
+        }
+    return None
+
+
+def _items_match(item1: Any, item2: Any) -> bool:
+    """Check if two list items match using the same logic as nac-yaml merge.
+
+    For dict items, matches when at least one shared primitive key exists
+    and all shared primitive values are equal. For scalar items, matches
+    on equality.
+
+    Args:
+        item1: First list element.
+        item2: Second list element.
+
+    Returns:
+        True if items match.
+    """
+    p1 = _primitives(item1)
+    p2 = _primitives(item2)
+
+    if p1 is not None and p2 is not None:
+        shared_keys = p1.keys() & p2.keys()
+        if not shared_keys:
+            return False
+        return bool(all(p1[k] == p2[k] for k in shared_keys))
+
+    # Scalar items: exact equality
+    return bool(item1 == item2)
+
+
+def _diff_list_items(
+    old_list: list[Any], new_list: list[Any]
+) -> tuple[list[Any], list[Any], list[tuple[Any, Any]], int]:
+    """Compute the differences between two lists.
+
+    Matches dict items using shared-primitive-key matching (same logic as
+    nac-yaml merge). Uses two passes to handle duplicates correctly:
+      1. Exact matches first — pairs items that are fully identical.
+      2. Primitive-key matches — pairs remaining items by shared keys.
+
+    This avoids greedy mis-pairings when duplicate items exist (e.g. two
+    items with the same name but different nested content).
+
+    Args:
+        old_list: List from the old version.
+        new_list: List from the new version.
+
+    Returns:
+        Tuple of (only_old, only_new, changed_pairs, identical_count) where
+        changed_pairs is a list of (old_item, new_item) tuples.
+    """
+    old_matched: list[bool] = [False] * len(old_list)
+    new_matched: list[bool] = [False] * len(new_list)
+    identical = 0
+    changed: list[tuple[Any, Any]] = []
+
+    # Pass 1: exact matches (deep equality) — highest confidence pairing
+    for i, old_item in enumerate(old_list):
+        for j, new_item in enumerate(new_list):
+            if new_matched[j]:
+                continue
+            if old_item == new_item:
+                old_matched[i] = True
+                new_matched[j] = True
+                identical += 1
+                break
+
+    # Pass 2: primitive-key matches on remaining unmatched items
+    for i, old_item in enumerate(old_list):
+        if old_matched[i]:
+            continue
+        for j, new_item in enumerate(new_list):
+            if new_matched[j]:
+                continue
+            if _items_match(old_item, new_item):
+                old_matched[i] = True
+                new_matched[j] = True
+                changed.append((old_item, new_item))
+                break
+
+    only_old = [old_list[i] for i in range(len(old_list)) if not old_matched[i]]
+    only_new = [new_list[j] for j in range(len(new_list)) if not new_matched[j]]
+
+    return only_old, only_new, changed, identical
 
 
 def format_enhanced_diff(
@@ -494,20 +580,55 @@ def format_enhanced_diff(
             lines.append(f"  Cause: {cause}")
             lines.append(f"  {light_rule}")
 
-            # Column headers
-            col_w = 38
-            left_hdr = f"v{OLD_VERSION}:"
-            right_hdr = f"v{NEW_VERSION}:"
-            lines.append(
-                f"  {C.RED}{left_hdr:<{col_w}}{C.RESET} {C.GREEN}{right_hdr}{C.RESET}"
+            # Compute list-level diff
+            only_old, only_new, changed_pairs, identical = _diff_list_items(
+                old_list, new_list
             )
+            col_w = 38
 
-            # Side-by-side content
-            left_lines = _format_yaml_list(old_list)
-            right_lines = _format_yaml_list(new_list)
-            sbs = _format_side_by_side(left_lines, right_lines, col_w)
-            for sbs_line in sbs:
-                lines.append(sbs_line)
+            # Items only in old (removed)
+            if only_old:
+                lines.append(
+                    f"  {C.RED}Removed ({len(only_old)} item(s)):{C.RESET}"
+                )
+                for item in only_old:
+                    for fl in _format_yaml_item(item):
+                        lines.append(f"    {C.RED}{fl}{C.RESET}")
+                lines.append("")
+
+            # Items only in new (added)
+            if only_new:
+                lines.append(
+                    f"  {C.GREEN}Added ({len(only_new)} item(s)):{C.RESET}"
+                )
+                for item in only_new:
+                    for fl in _format_yaml_item(item):
+                        lines.append(f"    {C.GREEN}{fl}{C.RESET}")
+                lines.append("")
+
+            # Items with same identity but different nested content
+            if changed_pairs:
+                lines.append(
+                    f"  {C.YELLOW}Changed ({len(changed_pairs)} item(s)):{C.RESET}"
+                )
+                left_hdr = f"v{OLD_VERSION}:"
+                right_hdr = f"v{NEW_VERSION}:"
+                lines.append(
+                    f"  {C.RED}{left_hdr:<{col_w}}{C.RESET} {C.GREEN}{right_hdr}{C.RESET}"
+                )
+                for old_item, new_item in changed_pairs:
+                    left_lines = _format_yaml_item(old_item)
+                    right_lines = _format_yaml_item(new_item)
+                    sbs = _format_side_by_side(left_lines, right_lines, col_w)
+                    for sbs_line in sbs:
+                        lines.append(sbs_line)
+                    lines.append("")
+
+            # Identical items summary
+            if identical > 0:
+                lines.append(
+                    f"  {C.BOLD}({identical} identical item(s) not shown){C.RESET}"
+                )
 
             # Footer
             lines.append(f"  {C.BOLD}{heavy_rule}{C.RESET}")
