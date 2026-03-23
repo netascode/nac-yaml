@@ -36,8 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import subprocess
+import subprocess  # nosec B404
 import sys
 import tempfile
 import textwrap
@@ -144,7 +143,7 @@ def run_version(version: str, paths: list[Path]) -> dict[str, Any]:
         *str_paths,
     ]
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603
             cmd,
             capture_output=True,
             text=True,
@@ -173,7 +172,8 @@ def run_version(version: str, paths: list[Path]) -> dict[str, Any]:
         sys.exit(2)
 
     try:
-        return json.loads(result.stdout)
+        parsed: dict[str, Any] = json.loads(result.stdout)
+        return parsed
     except json.JSONDecodeError as exc:
         print(
             f"{C.RED}Error:{C.RESET} invalid JSON from nac-yaml=={version}: {exc}",
@@ -182,9 +182,7 @@ def run_version(version: str, paths: list[Path]) -> dict[str, Any]:
         sys.exit(2)
 
 
-def diff_values(
-    old: Any, new: Any, path: str = "$"
-) -> list[dict[str, Any]]:
+def diff_values(old: Any, new: Any, path: str = "$") -> list[dict[str, Any]]:
     """Recursively compare two structures and return a list of differences.
 
     Args:
@@ -215,29 +213,35 @@ def diff_values(
             diffs.extend(diff_values(old[key], new[key], f"{path}.{key}"))
     elif isinstance(old, list):
         if len(old) != len(new):
-            diffs.append({
-                "path": path,
-                "type": "list_length",
-                "old": len(old),
-                "new": len(new),
-            })
+            diffs.append(
+                {
+                    "path": path,
+                    "type": "list_length",
+                    "old": len(old),
+                    "new": len(new),
+                }
+            )
         for i in range(min(len(old), len(new))):
             diffs.extend(diff_values(old[i], new[i], f"{path}[{i}]"))
         # Report extra elements on the longer side
         if len(old) > len(new):
             for i in range(len(new), len(old)):
-                diffs.append({
-                    "path": f"{path}[{i}]",
-                    "type": "removed",
-                    "old": old[i],
-                })
+                diffs.append(
+                    {
+                        "path": f"{path}[{i}]",
+                        "type": "removed",
+                        "old": old[i],
+                    }
+                )
         elif len(new) > len(old):
             for i in range(len(old), len(new)):
-                diffs.append({
-                    "path": f"{path}[{i}]",
-                    "type": "added",
-                    "new": new[i],
-                })
+                diffs.append(
+                    {
+                        "path": f"{path}[{i}]",
+                        "type": "added",
+                        "new": new[i],
+                    }
+                )
     else:
         if old != new:
             diffs.append({"path": path, "type": "changed", "old": old, "new": new})
@@ -265,19 +269,33 @@ def format_diff(diffs: list[dict[str, Any]]) -> str:
         path = f"{C.CYAN}{d['path']}{C.RESET}"
         dtype = d["type"]
         if dtype == "added":
-            lines.append(f"  {path}: {C.GREEN}+ {json.dumps(d['new'], sort_keys=True)}{C.RESET}")
+            lines.append(
+                f"  {path}: {C.GREEN}+ {json.dumps(d['new'], sort_keys=True)}{C.RESET}"
+            )
         elif dtype == "removed":
-            lines.append(f"  {path}: {C.RED}- {json.dumps(d['old'], sort_keys=True)}{C.RESET}")
+            lines.append(
+                f"  {path}: {C.RED}- {json.dumps(d['old'], sort_keys=True)}{C.RESET}"
+            )
         elif dtype == "changed":
             lines.append(f"  {path}:")
-            lines.append(f"    {C.RED}old: {json.dumps(d['old'], sort_keys=True)}{C.RESET}")
-            lines.append(f"    {C.GREEN}new: {json.dumps(d['new'], sort_keys=True)}{C.RESET}")
+            lines.append(
+                f"    {C.RED}old: {json.dumps(d['old'], sort_keys=True)}{C.RESET}"
+            )
+            lines.append(
+                f"    {C.GREEN}new: {json.dumps(d['new'], sort_keys=True)}{C.RESET}"
+            )
         elif dtype == "type_changed":
             lines.append(f"  {path}: type changed")
-            lines.append(f"    {C.RED}old ({type(d['old']).__name__}): {json.dumps(d['old'], sort_keys=True)}{C.RESET}")
-            lines.append(f"    {C.GREEN}new ({type(d['new']).__name__}): {json.dumps(d['new'], sort_keys=True)}{C.RESET}")
+            lines.append(
+                f"    {C.RED}old ({type(d['old']).__name__}): {json.dumps(d['old'], sort_keys=True)}{C.RESET}"
+            )
+            lines.append(
+                f"    {C.GREEN}new ({type(d['new']).__name__}): {json.dumps(d['new'], sort_keys=True)}{C.RESET}"
+            )
         elif dtype == "list_length":
-            lines.append(f"  {path}: list length {C.RED}{d['old']}{C.RESET} -> {C.GREEN}{d['new']}{C.RESET}")
+            lines.append(
+                f"  {path}: list length {C.RED}{d['old']}{C.RESET} -> {C.GREEN}{d['new']}{C.RESET}"
+            )
 
     return "\n".join(lines)
 
@@ -305,16 +323,22 @@ def find_list_diffs(
     scalar_diffs: list[dict[str, Any]] = []
 
     if type(old) is not type(new):
-        scalar_diffs.append({"path": path, "type": "type_changed", "old": old, "new": new})
+        scalar_diffs.append(
+            {"path": path, "type": "type_changed", "old": old, "new": new}
+        )
         return list_diffs, scalar_diffs
 
     if isinstance(old, dict):
         old_keys = set(old.keys())
         new_keys = set(new.keys())
         for key in sorted(old_keys - new_keys):
-            scalar_diffs.append({"path": f"{path}.{key}", "type": "removed", "old": old[key]})
+            scalar_diffs.append(
+                {"path": f"{path}.{key}", "type": "removed", "old": old[key]}
+            )
         for key in sorted(new_keys - old_keys):
-            scalar_diffs.append({"path": f"{path}.{key}", "type": "added", "new": new[key]})
+            scalar_diffs.append(
+                {"path": f"{path}.{key}", "type": "added", "new": new[key]}
+            )
         for key in sorted(old_keys & new_keys):
             ld, sd = find_list_diffs(old[key], new[key], f"{path}.{key}")
             list_diffs.extend(ld)
@@ -324,7 +348,9 @@ def find_list_diffs(
             list_diffs.append((path, old, new))
     else:
         if old != new:
-            scalar_diffs.append({"path": path, "type": "changed", "old": old, "new": new})
+            scalar_diffs.append(
+                {"path": path, "type": "changed", "old": old, "new": new}
+            )
 
     return list_diffs, scalar_diffs
 
@@ -382,7 +408,7 @@ def _format_yaml_item(item: Any, indent: int = 0) -> list[str]:
         for i, k in enumerate(keys):
             v = item[k]
             leader = f"{prefix}- " if i == 0 else f"{prefix}  "
-            if isinstance(v, (dict, list)):
+            if isinstance(v, (dict, list)):  # noqa: UP038
                 lines.append(f"{leader}{k}:")
                 for sub in _format_yaml_item(v, indent + 4):
                     lines.append(sub)
@@ -450,9 +476,7 @@ def format_enhanced_diff(
 
     if list_diffs:
         n = len(list_diffs)
-        lines.append(
-            f"{C.BOLD}{C.YELLOW}Found {n} list(s) with differences:{C.RESET}"
-        )
+        lines.append(f"{C.BOLD}{C.YELLOW}Found {n} list(s) with differences:{C.RESET}")
         lines.append("")
 
         for path, old_list, new_list in sorted(list_diffs):
