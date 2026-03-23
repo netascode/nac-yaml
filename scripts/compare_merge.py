@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2025 Daniel Schmidt
+
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["ruamel.yaml"]
