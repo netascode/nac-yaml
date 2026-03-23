@@ -147,7 +147,7 @@ def run_version(version: str, paths: list[Path]) -> dict[str, Any]:
             cmd,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
             cwd=tempfile.gettempdir(),
         )
     except FileNotFoundError:
@@ -159,7 +159,7 @@ def run_version(version: str, paths: list[Path]) -> dict[str, Any]:
         sys.exit(2)
     except subprocess.TimeoutExpired:
         print(
-            f"{C.RED}Error:{C.RESET} nac-yaml=={version} timed out after 120s",
+            f"{C.RED}Error:{C.RESET} nac-yaml=={version} timed out after 300s",
             file=sys.stderr,
         )
         sys.exit(2)
