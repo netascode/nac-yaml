@@ -588,9 +588,7 @@ def format_enhanced_diff(
 
             # Items only in old (removed)
             if only_old:
-                lines.append(
-                    f"  {C.RED}Removed ({len(only_old)} item(s)):{C.RESET}"
-                )
+                lines.append(f"  {C.RED}Removed ({len(only_old)} item(s)):{C.RESET}")
                 for item in only_old:
                     for fl in _format_yaml_item(item):
                         lines.append(f"    {C.RED}{fl}{C.RESET}")
@@ -598,9 +596,7 @@ def format_enhanced_diff(
 
             # Items only in new (added)
             if only_new:
-                lines.append(
-                    f"  {C.GREEN}Added ({len(only_new)} item(s)):{C.RESET}"
-                )
+                lines.append(f"  {C.GREEN}Added ({len(only_new)} item(s)):{C.RESET}")
                 for item in only_new:
                     for fl in _format_yaml_item(item):
                         lines.append(f"    {C.GREEN}{fl}{C.RESET}")
