@@ -6,9 +6,12 @@ import logging
 import os
 import subprocess  # nosec B404
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, cast
 
 from ruamel import yaml
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +200,8 @@ def load_yaml_files(paths: list[Path], deduplicate: bool = True) -> dict[str, An
         with open(file_path) as file:
             if file_path.suffix in [".yaml", ".yml"]:
                 data_yaml = file.read()
-                dict = y.load(data_yaml)
-                merge_dict(dict, data, deduplicate)
+                loaded = y.load(data_yaml)
+                merge_dict(loaded, data, deduplicate)
 
     result: dict[str, Any] = {}
     for path in paths:
@@ -211,7 +214,23 @@ def load_yaml_files(paths: list[Path], deduplicate: bool = True) -> dict[str, An
                         _load_file(Path(dir, filename), result)
                     except:  # noqa: E722
                         logger.warning(f"Could not load file: {filename}")
-    return result
+
+    return _to_builtin_types(result)
+
+
+def _to_builtin_types(value: T) -> T:
+    v: Any = value
+    if isinstance(v, CommentedMap):
+        v = dict(v)
+    elif isinstance(v, CommentedSeq):
+        v = list(v)
+
+    if isinstance(v, dict):
+        v = {k: _to_builtin_types(vv) for k, vv in v.items()}
+    elif isinstance(v, list):
+        v = [_to_builtin_types(vv) for vv in v]
+
+    return cast(T, v)
 
 
 def _items_would_merge(item1: dict[str, Any], item2: dict[str, Any]) -> bool:
