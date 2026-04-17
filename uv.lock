@@ -509,7 +509,7 @@ wheels = [
 
 [[package]]
 name = "nac-yaml"
-version = "2.0.0a0"
+version = "2.0.0b1"
 source = { editable = "." }
 dependencies = [
     { name = "ruamel-yaml" },
