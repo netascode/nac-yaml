@@ -229,19 +229,19 @@ def _items_would_merge(item1: dict[str, Any], item2: dict[str, Any]) -> bool:
         - All shared primitive values must match exactly
         - Ignores dict and list fields for matching
     """
-    # Extract primitive keys using set comprehension
-    keys1 = {k for k, v in item1.items() if not isinstance(v, dict | list)}
-    keys2 = {k for k, v in item2.items() if not isinstance(v, dict | list)}
-
-    # Find shared primitive keys (set intersection)
-    shared_keys = keys1 & keys2
-
-    # No shared primitive keys means no comparison possible
-    if not shared_keys:
-        return False
-
-    # Check if all shared values match (short-circuits on first mismatch)
-    return all(item1[k] == item2[k] for k in shared_keys)
+    comparison = False
+    for k, v1 in item1.items():
+        if isinstance(v1, dict | list):
+            continue
+        if k not in item2:
+            continue
+        v2 = item2[k]
+        if isinstance(v2, dict | list):
+            continue
+        comparison = True
+        if v1 != v2:
+            return False
+    return comparison
 
 
 def _extract_primitives(item: dict[str, Any]) -> dict[str, Any]:
