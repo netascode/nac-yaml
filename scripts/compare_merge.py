@@ -28,6 +28,7 @@ Usage:
   python scripts/compare_merge.py path1.yaml path2.yaml [dir/] ...
   python scripts/compare_merge.py --dump-old /tmp/old.yaml --dump-new /tmp/new.yaml paths...
   python scripts/compare_merge.py --json paths...
+  python scripts/compare_merge.py --diff paths...
 
 Exit codes:
   0 - Identical output from both versions
@@ -39,10 +40,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess  # nosec B404
 import sys
 import tempfile
 import textwrap
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -155,8 +158,7 @@ def run_version(version: str, paths: list[Path]) -> dict[str, Any]:
         )
     except FileNotFoundError:
         print(
-            f"{C.RED}Error:{C.RESET} 'uv' not found. Install it: "
-            "curl -LsSf https://astral.sh/uv/install.sh | sh",
+            f"{C.RED}Error:{C.RESET} 'uv' not found. Install it: curl -LsSf https://astral.sh/uv/install.sh | sh",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -272,33 +274,21 @@ def format_diff(diffs: list[dict[str, Any]]) -> str:
         path = f"{C.CYAN}{d['path']}{C.RESET}"
         dtype = d["type"]
         if dtype == "added":
-            lines.append(
-                f"  {path}: {C.GREEN}+ {json.dumps(d['new'], sort_keys=True)}{C.RESET}"
-            )
+            lines.append(f"  {path}: {C.GREEN}+ {json.dumps(d['new'], sort_keys=True)}{C.RESET}")
         elif dtype == "removed":
-            lines.append(
-                f"  {path}: {C.RED}- {json.dumps(d['old'], sort_keys=True)}{C.RESET}"
-            )
+            lines.append(f"  {path}: {C.RED}- {json.dumps(d['old'], sort_keys=True)}{C.RESET}")
         elif dtype == "changed":
             lines.append(f"  {path}:")
-            lines.append(
-                f"    {C.RED}old: {json.dumps(d['old'], sort_keys=True)}{C.RESET}"
-            )
-            lines.append(
-                f"    {C.GREEN}new: {json.dumps(d['new'], sort_keys=True)}{C.RESET}"
-            )
+            lines.append(f"    {C.RED}old: {json.dumps(d['old'], sort_keys=True)}{C.RESET}")
+            lines.append(f"    {C.GREEN}new: {json.dumps(d['new'], sort_keys=True)}{C.RESET}")
         elif dtype == "type_changed":
             lines.append(f"  {path}: type changed")
-            lines.append(
-                f"    {C.RED}old ({type(d['old']).__name__}): {json.dumps(d['old'], sort_keys=True)}{C.RESET}"
-            )
+            lines.append(f"    {C.RED}old ({type(d['old']).__name__}): {json.dumps(d['old'], sort_keys=True)}{C.RESET}")
             lines.append(
                 f"    {C.GREEN}new ({type(d['new']).__name__}): {json.dumps(d['new'], sort_keys=True)}{C.RESET}"
             )
         elif dtype == "list_length":
-            lines.append(
-                f"  {path}: list length {C.RED}{d['old']}{C.RESET} -> {C.GREEN}{d['new']}{C.RESET}"
-            )
+            lines.append(f"  {path}: list length {C.RED}{d['old']}{C.RESET} -> {C.GREEN}{d['new']}{C.RESET}")
 
     return "\n".join(lines)
 
@@ -326,22 +316,16 @@ def find_list_diffs(
     scalar_diffs: list[dict[str, Any]] = []
 
     if type(old) is not type(new):
-        scalar_diffs.append(
-            {"path": path, "type": "type_changed", "old": old, "new": new}
-        )
+        scalar_diffs.append({"path": path, "type": "type_changed", "old": old, "new": new})
         return list_diffs, scalar_diffs
 
     if isinstance(old, dict):
         old_keys = set(old.keys())
         new_keys = set(new.keys())
         for key in sorted(old_keys - new_keys):
-            scalar_diffs.append(
-                {"path": f"{path}.{key}", "type": "removed", "old": old[key]}
-            )
+            scalar_diffs.append({"path": f"{path}.{key}", "type": "removed", "old": old[key]})
         for key in sorted(new_keys - old_keys):
-            scalar_diffs.append(
-                {"path": f"{path}.{key}", "type": "added", "new": new[key]}
-            )
+            scalar_diffs.append({"path": f"{path}.{key}", "type": "added", "new": new[key]})
         for key in sorted(old_keys & new_keys):
             ld, sd = find_list_diffs(old[key], new[key], f"{path}.{key}")
             list_diffs.extend(ld)
@@ -351,15 +335,18 @@ def find_list_diffs(
             list_diffs.append((path, old, new))
     else:
         if old != new:
-            scalar_diffs.append(
-                {"path": path, "type": "changed", "old": old, "new": new}
-            )
+            scalar_diffs.append({"path": path, "type": "changed", "old": old, "new": new})
 
     return list_diffs, scalar_diffs
 
 
 def _classify_cause(old_list: list[Any], new_list: list[Any]) -> str:
     """Classify which PR #34 behavior change caused a list diff.
+
+    Analyzes list contents to detect specific patterns:
+      - Concatenation instead of merge (list grew, duplicate keys detected)
+      - Deduplication (list shrunk, duplicate scalars removed)
+      - Relaxed matching (list shrunk, dict items merged more aggressively)
 
     Args:
         old_list: List from the old version.
@@ -368,17 +355,41 @@ def _classify_cause(old_list: list[Any], new_list: list[Any]) -> str:
     Returns:
         Human-readable cause description.
     """
+    if len(new_list) > len(old_list):
+        # List grew → concatenation instead of merge pattern
+        if all(isinstance(item, dict) for item in new_list):
+            id_keys = ("name", "id", "prefix", "sequence")
+            for key in id_keys:
+                values = [item.get(key) for item in new_list if key in item]
+                if len(values) > 1:
+                    counts = Counter(str(v) for v in values)
+                    dupes = {v: c for v, c in counts.items() if c > 1}
+                    if dupes:
+                        top3 = sorted(dupes.items(), key=lambda x: -x[1])[:3]
+                        dupe_desc = ", ".join(f"'{v}' \u00d7{c}" for v, c in top3)
+                        return (
+                            f"Concatenation instead of merge \u2014 v2 detected duplicate\n"
+                            f"         '{key}' values across files and kept items separate.\n"
+                            f"         Duplicates: {dupe_desc}"
+                        )
+        return "v2 concatenated instead of merging (duplicate detection triggered)."
+
     if len(old_list) > len(new_list):
-        return (
-            "Relaxed matching \u2014 v2 merges items when shared keys\n"
-            "         match, even if both sides have unique keys."
-        )
-    elif len(old_list) < len(new_list):
-        return (
-            "Duplicate preservation \u2014 v2 detected within-file\n"
-            "         duplicates and disabled merging (concatenated instead)."
-        )
-    return "Behavior change between versions."
+        # List shrunk → deduplication or relaxed matching
+        if all(not isinstance(item, (dict, list)) for item in old_list):
+            old_counts = Counter(str(v) for v in old_list)
+            has_dupes = any(c > 1 for c in old_counts.values())
+            new_counts = Counter(str(v) for v in new_list)
+            new_is_unique = all(c == 1 for c in new_counts.values())
+            if has_dupes and new_is_unique:
+                removed = len(old_list) - len(new_list)
+                return (
+                    f"Deduplication \u2014 v2 removed {removed} duplicate scalar\n"
+                    f"         entries (v1 preserved duplicates)."
+                )
+        return "Relaxed matching \u2014 v2 merges items more aggressively\n         when shared keys match."
+
+    return "Items matched differently between versions."
 
 
 def _format_yaml_value(v: Any) -> str:
@@ -421,9 +432,7 @@ def _format_yaml_item(item: Any, indent: int = 0) -> list[str]:
     return [f"{prefix}- {_format_yaml_value(item)}"]
 
 
-def _format_side_by_side(
-    left: list[str], right: list[str], col_width: int = 38
-) -> list[str]:
+def _format_side_by_side(left: list[str], right: list[str], col_width: int = 38) -> list[str]:
     """Format two column lists side-by-side.
 
     Args:
@@ -544,15 +553,243 @@ def _diff_list_items(
     return only_old, only_new, changed, identical
 
 
+def _item_identity(item: Any) -> str:
+    """Return a short identity string for a list item (e.g. 'name: build-router-1').
+
+    Uses common identifier keys to produce a human-readable label.
+
+    Args:
+        item: A list element.
+
+    Returns:
+        Identity string, or repr for non-dict/scalar items.
+    """
+    if isinstance(item, dict):
+        id_keys = ("name", "id", "prefix", "sequence", "interface_name", "vrf", "host")
+        parts = []
+        for k in id_keys:
+            if k in item:
+                parts.append(f"{k}: {_format_yaml_value(item[k])}")
+        if parts:
+            return ", ".join(parts)
+        # Fallback: show first few primitive keys
+        prims = _primitives(item)
+        if prims:
+            first = list(prims.items())[:3]
+            return ", ".join(f"{k}: {_format_yaml_value(v)}" for k, v in first)
+        return "(dict item)"
+    return repr(item)
+
+
+def _parse_diff_path(path: str) -> list[str]:
+    """Parse a JSON-path-style string into path segments.
+
+    Examples:
+        "$"                             -> []
+        "$.configuration"               -> ["configuration"]
+        "$.groups[0].core_interfaces"   -> ["groups", "[0]", "core_interfaces"]
+
+    Args:
+        path: JSON-path string (e.g. "$.a.b[0].c").
+
+    Returns:
+        List of segment strings.
+    """
+    if path == "$":
+        return []
+    raw = path[2:] if path.startswith("$.") else path.lstrip("$")
+    return re.findall(r"[^.\[\]]+|\[\d+\]", raw)
+
+
+def _truncate(s: str, max_len: int = 80) -> str:
+    """Truncate a string, adding ellipsis if it exceeds *max_len*."""
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 3] + "..."
+
+
+def _format_value_short(val: Any, max_len: int = 80) -> str:
+    """Render a value as a compact string, truncated to *max_len*."""
+    if isinstance(val, (dict, list)):
+        s = json.dumps(val, sort_keys=True)
+    else:
+        s = _format_yaml_value(val)
+    return _truncate(s, max_len)
+
+
+def _collapse_scalar_runs(diffs: list[dict[str, Any]], threshold: int = 5) -> list[dict[str, Any]]:
+    """Collapse runs of scalar add/remove diffs from the same list into summaries.
+
+    When a list has many individual scalar entries added/removed (e.g. 88
+    product_types removed), collapse them into a single summary line instead
+    of showing each one individually.
+
+    Args:
+        diffs: List of diff entries from diff_values().
+        threshold: Minimum number of scalar diffs in a group to trigger collapse.
+
+    Returns:
+        Modified diff list with collapsed summary entries replacing individual ones.
+    """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    non_collapsible: list[dict[str, Any]] = []
+
+    for d in diffs:
+        path = d["path"]
+        dtype = d["type"]
+        if dtype in ("added", "removed") and re.search(r"\[\d+\]$", path):
+            val = d.get("old" if dtype == "removed" else "new")
+            if not isinstance(val, (dict, list)):  # noqa: UP038
+                parent = re.sub(r"\[\d+\]$", "", path)
+                groups[(parent, dtype)].append(d)
+                continue
+        non_collapsible.append(d)
+
+    result = list(non_collapsible)
+    for (parent, dtype), group_diffs in sorted(groups.items()):
+        if len(group_diffs) >= threshold:
+            values = [d.get("old" if dtype == "removed" else "new") for d in group_diffs]
+            counts = Counter(str(v) for v in values)
+            top_items = counts.most_common(5)
+            summary_parts = [f"{v} \u00d7{c}" for v, c in top_items]
+            if len(counts) > 5:
+                summary_parts.append(f"... +{len(counts) - 5} more unique values")
+            result.append(
+                {
+                    "path": parent,
+                    "type": "collapsed_scalars",
+                    "label": dtype,
+                    "count": len(group_diffs),
+                    "summary": ", ".join(summary_parts),
+                }
+            )
+        else:
+            result.extend(group_diffs)
+
+    return result
+
+
+def _format_item_summary(item: Any) -> str:
+    """Summarize a dict item by identity and top-level key categories.
+
+    Produces a compact one-line summary showing the item's identity
+    (name, id, etc.) and its top-level keys grouped by type.
+
+    Args:
+        item: A list element (dict or scalar).
+
+    Returns:
+        Compact summary string.
+    """
+    if isinstance(item, dict):
+        identity = _item_identity(item)
+        scalar_keys: list[str] = []
+        dict_keys: list[str] = []
+        list_keys: list[str] = []
+        for k, v in sorted(item.items()):
+            if isinstance(v, dict):
+                dict_keys.append(k)
+            elif isinstance(v, list):
+                list_keys.append(f"{k}[{len(v)}]")
+            else:
+                scalar_keys.append(k)
+        parts: list[str] = []
+        if scalar_keys:
+            parts.append(", ".join(scalar_keys))
+        if dict_keys:
+            parts.append("dicts: " + ", ".join(dict_keys))
+        if list_keys:
+            parts.append("lists: " + ", ".join(list_keys))
+        key_summary = " | ".join(parts) if parts else "(empty dict)"
+        if identity and identity != "(dict item)":
+            return f"[{identity}] — {key_summary}"
+        return key_summary
+    return _truncate(repr(item), 80)
+
+
+def _render_diff_tree(diffs: list[dict[str, Any]]) -> list[str]:
+    """Render leaf diffs as an indented YAML-like context tree.
+
+    Groups diffs by their path hierarchy so the nesting structure of
+    the data model is visible, with only differing branches expanded.
+
+    Args:
+        diffs: Leaf diff entries from diff_values().
+
+    Returns:
+        List of formatted, colored lines.
+    """
+    if not diffs:
+        return []
+
+    lines: list[str] = []
+    prev_segments: list[str] = []
+    base_indent = "      "  # 6-space base
+
+    for d in sorted(diffs, key=lambda x: x["path"]):
+        segments = _parse_diff_path(d["path"])
+
+        # How many leading segments match the previous path?
+        common = 0
+        for i in range(min(len(prev_segments), len(segments))):
+            if prev_segments[i] == segments[i]:
+                common = i + 1
+            else:
+                break
+
+        # Print new intermediate path segments (structural context)
+        for i in range(common, max(0, len(segments) - 1)):
+            indent = base_indent + "  " * i
+            lines.append(f"{indent}{C.CYAN}{segments[i]}:{C.RESET}")
+
+        # Print the leaf segment with diff annotation
+        depth = max(0, len(segments) - 1)
+        indent = base_indent + "  " * depth
+        leaf = segments[-1] if segments else "$"
+        dtype = d["type"]
+
+        if dtype == "added":
+            val = _format_item_summary(d["new"]) if isinstance(d["new"], dict) else _format_value_short(d["new"])
+            lines.append(f"{indent}{C.GREEN}{leaf}: + {val}{C.RESET}")
+        elif dtype == "removed":
+            val = _format_item_summary(d["old"]) if isinstance(d["old"], dict) else _format_value_short(d["old"])
+            lines.append(f"{indent}{C.RED}{leaf}: - {val}{C.RESET}")
+        elif dtype == "changed":
+            lines.append(f"{indent}{leaf}:")
+            lines.append(f"{indent}  {C.RED}old: {_format_value_short(d['old'])}{C.RESET}")
+            lines.append(f"{indent}  {C.GREEN}new: {_format_value_short(d['new'])}{C.RESET}")
+        elif dtype == "type_changed":
+            lines.append(f"{indent}{leaf}: type changed")
+            lines.append(f"{indent}  {C.RED}old ({type(d['old']).__name__}): {_format_value_short(d['old'])}{C.RESET}")
+            lines.append(
+                f"{indent}  {C.GREEN}new ({type(d['new']).__name__}): {_format_value_short(d['new'])}{C.RESET}"
+            )
+        elif dtype == "list_length":
+            lines.append(f"{indent}{leaf}: {C.RED}{d['old']} items{C.RESET} → {C.GREEN}{d['new']} items{C.RESET}")
+        elif dtype == "collapsed_scalars":
+            color = C.RED if d["label"] == "removed" else C.GREEN
+            lines.append(f"{indent}{color}{leaf}: ({d['count']} {d['label']} scalars: {d['summary']}){C.RESET}")
+
+        prev_segments = segments
+
+    return lines
+
+
 def format_enhanced_diff(
     list_diffs: list[tuple[str, list[Any], list[Any]]],
     scalar_diffs: list[dict[str, Any]],
+    *,
+    verbose: bool = False,
 ) -> str:
-    """Format diff results as side-by-side list comparisons.
+    """Format diff results with precise leaf-level diffs for changed items.
+
+    By default, shows only the exact differing paths for changed items.
+    With verbose=True, also shows the full side-by-side rendering.
 
     Args:
         list_diffs: List of (path, old_list, new_list) tuples.
         scalar_diffs: List of scalar diff dicts.
+        verbose: If True, include full side-by-side output for changed items.
 
     Returns:
         Formatted multi-line string with colored output.
@@ -584,50 +821,63 @@ def format_enhanced_diff(
             lines.append(f"  {light_rule}")
 
             # Compute list-level diff
-            only_old, only_new, changed_pairs, identical = _diff_list_items(
-                old_list, new_list
-            )
+            only_old, only_new, changed_pairs, identical = _diff_list_items(old_list, new_list)
             col_w = 38
 
             # Items only in old (removed)
             if only_old:
                 lines.append(f"  {C.RED}Removed ({len(only_old)} item(s)):{C.RESET}")
                 for item in only_old:
-                    for fl in _format_yaml_item(item):
-                        lines.append(f"    {C.RED}{fl}{C.RESET}")
+                    lines.append(f"    {C.RED}{_format_item_summary(item)}{C.RESET}")
+                    if verbose:
+                        for fl in _format_yaml_item(item):
+                            lines.append(f"      {C.RED}{fl}{C.RESET}")
                 lines.append("")
 
             # Items only in new (added)
             if only_new:
                 lines.append(f"  {C.GREEN}Added ({len(only_new)} item(s)):{C.RESET}")
                 for item in only_new:
-                    for fl in _format_yaml_item(item):
-                        lines.append(f"    {C.GREEN}{fl}{C.RESET}")
+                    lines.append(f"    {C.GREEN}{_format_item_summary(item)}{C.RESET}")
+                    if verbose:
+                        for fl in _format_yaml_item(item):
+                            lines.append(f"      {C.GREEN}{fl}{C.RESET}")
                 lines.append("")
 
             # Items with same identity but different nested content
             if changed_pairs:
-                lines.append(
-                    f"  {C.YELLOW}Changed ({len(changed_pairs)} item(s)):{C.RESET}"
-                )
-                left_hdr = f"v{OLD_VERSION}:"
-                right_hdr = f"v{NEW_VERSION}:"
-                lines.append(
-                    f"  {C.RED}{left_hdr:<{col_w}}{C.RESET} {C.GREEN}{right_hdr}{C.RESET}"
-                )
-                for old_item, new_item in changed_pairs:
-                    left_lines = _format_yaml_item(old_item)
-                    right_lines = _format_yaml_item(new_item)
-                    sbs = _format_side_by_side(left_lines, right_lines, col_w)
-                    for sbs_line in sbs:
-                        lines.append(sbs_line)
+                lines.append(f"  {C.YELLOW}Changed ({len(changed_pairs)} item(s)):{C.RESET}")
+
+                for _idx, (old_item, new_item) in enumerate(changed_pairs):
+                    identity = _item_identity(old_item)
+                    lines.append(f"  {C.BOLD}  [{identity}]{C.RESET}")
+
+                    # Precise leaf-level diffs as YAML-like context tree
+                    leaf_diffs = diff_values(old_item, new_item, path="$")
+                    diff_count = len(leaf_diffs)
+                    leaf_diffs = _collapse_scalar_runs(leaf_diffs)
+                    if leaf_diffs:
+                        lines.append(f"    {diff_count} difference(s):")
+                        lines.extend(_render_diff_tree(leaf_diffs))
+                    else:
+                        lines.append(f"    {C.GREEN}(no leaf-level differences){C.RESET}")
                     lines.append("")
+
+                    # Verbose: also show full side-by-side
+                    if verbose:
+                        left_hdr = f"v{OLD_VERSION}:"
+                        right_hdr = f"v{NEW_VERSION}:"
+                        lines.append(f"  {C.RED}{left_hdr:<{col_w}}{C.RESET} {C.GREEN}{right_hdr}{C.RESET}")
+                        left_lines = _format_yaml_item(old_item)
+                        right_lines = _format_yaml_item(new_item)
+                        sbs = _format_side_by_side(left_lines, right_lines, col_w)
+                        for sbs_line in sbs:
+                            lines.append(sbs_line)
+                        lines.append("")
 
             # Identical items summary
             if identical > 0:
-                lines.append(
-                    f"  {C.BOLD}({identical} identical item(s) not shown){C.RESET}"
-                )
+                lines.append(f"  {C.BOLD}({identical} identical item(s) not shown){C.RESET}")
 
             # Footer
             lines.append(f"  {C.BOLD}{heavy_rule}{C.RESET}")
@@ -672,15 +922,10 @@ def dump_yaml(data: dict[str, Any], path: Path) -> None:
         )
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(
-        description=(
-            f"Compare nac-yaml merge output between v{OLD_VERSION} and v{NEW_VERSION}."
-        ),
-        epilog=(
-            "Exit codes: 0 = identical, 1 = differences found, 2 = error.\n"
-            "Requires: Python 3.10+, uv"
-        ),
+        description=(f"Compare nac-yaml merge output between v{OLD_VERSION} and v{NEW_VERSION}."),
+        epilog=("Exit codes: 0 = identical, 1 = differences found, 2 = error.\nRequires: Python 3.10+, uv"),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -704,7 +949,24 @@ def main() -> None:
         dest="json_output",
         help="Output structured JSON result instead of colored diff",
     )
+    parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="Show full side-by-side YAML output for changed items (in addition to precise diffs)",
+    )
+    parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="Render both merge results as YAML and show unified diff (like diff -u)",
+    )
     args = parser.parse_args()
+
+    if args.diff and (args.json_output or args.raw):
+        print(
+            f"{C.RED}Error:{C.RESET} --diff cannot be combined with --json or --raw",
+            file=sys.stderr,
+        )
+        return 2
 
     resolved = resolve_paths(args.paths)
 
@@ -727,25 +989,43 @@ def main() -> None:
         dump_yaml(new_data, Path(args.dump_new))
         print(f"Wrote v{NEW_VERSION} output to {args.dump_new}", file=sys.stderr)
 
-    # Compare
-    diffs = diff_values(old_data, new_data)
-
-    if args.json_output:
-        result = {
-            "identical": len(diffs) == 0,
-            "old_version": OLD_VERSION,
-            "new_version": NEW_VERSION,
-            "paths": [str(p) for p in resolved],
-            "differences": diffs,
-        }
-        json.dump(result, sys.stdout, indent=2, sort_keys=True)
-        print()
+    # Unified diff mode: dump both as YAML to temp files, run diff -u
+    if args.diff:
+        with tempfile.TemporaryDirectory() as td:
+            old_path = Path(td) / f"merged_v{OLD_VERSION}.yaml"
+            new_path = Path(td) / f"merged_v{NEW_VERSION}.yaml"
+            dump_yaml(old_data, old_path)
+            dump_yaml(new_data, new_path)
+            diff_result = subprocess.run(  # nosec B603
+                ["diff", "-u", f"--label=v{OLD_VERSION}", f"--label=v{NEW_VERSION}", str(old_path), str(new_path)],
+                capture_output=True,
+                text=True,
+            )
+            if diff_result.stdout:
+                print(diff_result.stdout)
+            else:
+                print(f"{C.GREEN}✓ Merge outputs are identical.{C.RESET}")
+            rc = diff_result.returncode
     else:
-        list_diffs, scalar_diffs = find_list_diffs(old_data, new_data)
-        print(format_enhanced_diff(list_diffs, scalar_diffs))
+        # Compare
+        diffs = diff_values(old_data, new_data)
 
-    sys.exit(0 if len(diffs) == 0 else 1)
+        if args.json_output:
+            result = {
+                "identical": len(diffs) == 0,
+                "old_version": OLD_VERSION,
+                "new_version": NEW_VERSION,
+                "paths": [str(p) for p in resolved],
+                "differences": diffs,
+            }
+            json.dump(result, sys.stdout, indent=2, sort_keys=True)
+            print()
+        else:
+            list_diffs, scalar_diffs = find_list_diffs(old_data, new_data)
+            print(format_enhanced_diff(list_diffs, scalar_diffs, verbose=args.raw))
+        rc = 0 if len(diffs) == 0 else 1
 
+    return rc
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
