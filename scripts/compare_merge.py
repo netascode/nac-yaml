@@ -848,7 +848,7 @@ def format_enhanced_diff(
             if changed_pairs:
                 lines.append(f"  {C.YELLOW}Changed ({len(changed_pairs)} item(s)):{C.RESET}")
 
-                for idx, (old_item, new_item) in enumerate(changed_pairs):
+                for _idx, (old_item, new_item) in enumerate(changed_pairs):
                     identity = _item_identity(old_item)
                     lines.append(f"  {C.BOLD}  [{identity}]{C.RESET}")
 
@@ -922,7 +922,7 @@ def dump_yaml(data: dict[str, Any], path: Path) -> None:
         )
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description=(f"Compare nac-yaml merge output between v{OLD_VERSION} and v{NEW_VERSION}."),
         epilog=("Exit codes: 0 = identical, 1 = differences found, 2 = error.\nRequires: Python 3.10+, uv"),
@@ -961,6 +961,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.diff and (args.json_output or args.raw):
+        print(
+            f"{C.RED}Error:{C.RESET} --diff cannot be combined with --json or --raw",
+            file=sys.stderr,
+        )
+        return 2
+
     resolved = resolve_paths(args.paths)
 
     # Run both versions in parallel
@@ -989,36 +996,36 @@ def main() -> None:
             new_path = Path(td) / f"merged_v{NEW_VERSION}.yaml"
             dump_yaml(old_data, old_path)
             dump_yaml(new_data, new_path)
-            result = subprocess.run(  # nosec B603
+            diff_result = subprocess.run(  # nosec B603
                 ["diff", "-u", f"--label=v{OLD_VERSION}", f"--label=v{NEW_VERSION}", str(old_path), str(new_path)],
                 capture_output=True,
                 text=True,
             )
-            if result.stdout:
-                print(result.stdout)
+            if diff_result.stdout:
+                print(diff_result.stdout)
             else:
                 print(f"{C.GREEN}✓ Merge outputs are identical.{C.RESET}")
-        sys.exit(0 if result.returncode == 0 else 1)
-
-    # Compare
-    diffs = diff_values(old_data, new_data)
-
-    if args.json_output:
-        result = {
-            "identical": len(diffs) == 0,
-            "old_version": OLD_VERSION,
-            "new_version": NEW_VERSION,
-            "paths": [str(p) for p in resolved],
-            "differences": diffs,
-        }
-        json.dump(result, sys.stdout, indent=2, sort_keys=True)
-        print()
+            rc = diff_result.returncode
     else:
-        list_diffs, scalar_diffs = find_list_diffs(old_data, new_data)
-        print(format_enhanced_diff(list_diffs, scalar_diffs, verbose=args.raw))
+        # Compare
+        diffs = diff_values(old_data, new_data)
 
-    sys.exit(0 if len(diffs) == 0 else 1)
+        if args.json_output:
+            result = {
+                "identical": len(diffs) == 0,
+                "old_version": OLD_VERSION,
+                "new_version": NEW_VERSION,
+                "paths": [str(p) for p in resolved],
+                "differences": diffs,
+            }
+            json.dump(result, sys.stdout, indent=2, sort_keys=True)
+            print()
+        else:
+            list_diffs, scalar_diffs = find_list_diffs(old_data, new_data)
+            print(format_enhanced_diff(list_diffs, scalar_diffs, verbose=args.raw))
+        rc = 0 if len(diffs) == 0 else 1
 
+    return rc
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
