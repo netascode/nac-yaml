@@ -274,21 +274,33 @@ def format_diff(diffs: list[dict[str, Any]]) -> str:
         path = f"{C.CYAN}{d['path']}{C.RESET}"
         dtype = d["type"]
         if dtype == "added":
-            lines.append(f"  {path}: {C.GREEN}+ {json.dumps(d['new'], sort_keys=True)}{C.RESET}")
+            lines.append(
+                f"  {path}: {C.GREEN}+ {json.dumps(d['new'], sort_keys=True)}{C.RESET}"
+            )
         elif dtype == "removed":
-            lines.append(f"  {path}: {C.RED}- {json.dumps(d['old'], sort_keys=True)}{C.RESET}")
+            lines.append(
+                f"  {path}: {C.RED}- {json.dumps(d['old'], sort_keys=True)}{C.RESET}"
+            )
         elif dtype == "changed":
             lines.append(f"  {path}:")
-            lines.append(f"    {C.RED}old: {json.dumps(d['old'], sort_keys=True)}{C.RESET}")
-            lines.append(f"    {C.GREEN}new: {json.dumps(d['new'], sort_keys=True)}{C.RESET}")
+            lines.append(
+                f"    {C.RED}old: {json.dumps(d['old'], sort_keys=True)}{C.RESET}"
+            )
+            lines.append(
+                f"    {C.GREEN}new: {json.dumps(d['new'], sort_keys=True)}{C.RESET}"
+            )
         elif dtype == "type_changed":
             lines.append(f"  {path}: type changed")
-            lines.append(f"    {C.RED}old ({type(d['old']).__name__}): {json.dumps(d['old'], sort_keys=True)}{C.RESET}")
+            lines.append(
+                f"    {C.RED}old ({type(d['old']).__name__}): {json.dumps(d['old'], sort_keys=True)}{C.RESET}"
+            )
             lines.append(
                 f"    {C.GREEN}new ({type(d['new']).__name__}): {json.dumps(d['new'], sort_keys=True)}{C.RESET}"
             )
         elif dtype == "list_length":
-            lines.append(f"  {path}: list length {C.RED}{d['old']}{C.RESET} -> {C.GREEN}{d['new']}{C.RESET}")
+            lines.append(
+                f"  {path}: list length {C.RED}{d['old']}{C.RESET} -> {C.GREEN}{d['new']}{C.RESET}"
+            )
 
     return "\n".join(lines)
 
@@ -316,16 +328,22 @@ def find_list_diffs(
     scalar_diffs: list[dict[str, Any]] = []
 
     if type(old) is not type(new):
-        scalar_diffs.append({"path": path, "type": "type_changed", "old": old, "new": new})
+        scalar_diffs.append(
+            {"path": path, "type": "type_changed", "old": old, "new": new}
+        )
         return list_diffs, scalar_diffs
 
     if isinstance(old, dict):
         old_keys = set(old.keys())
         new_keys = set(new.keys())
         for key in sorted(old_keys - new_keys):
-            scalar_diffs.append({"path": f"{path}.{key}", "type": "removed", "old": old[key]})
+            scalar_diffs.append(
+                {"path": f"{path}.{key}", "type": "removed", "old": old[key]}
+            )
         for key in sorted(new_keys - old_keys):
-            scalar_diffs.append({"path": f"{path}.{key}", "type": "added", "new": new[key]})
+            scalar_diffs.append(
+                {"path": f"{path}.{key}", "type": "added", "new": new[key]}
+            )
         for key in sorted(old_keys & new_keys):
             ld, sd = find_list_diffs(old[key], new[key], f"{path}.{key}")
             list_diffs.extend(ld)
@@ -335,7 +353,9 @@ def find_list_diffs(
             list_diffs.append((path, old, new))
     else:
         if old != new:
-            scalar_diffs.append({"path": path, "type": "changed", "old": old, "new": new})
+            scalar_diffs.append(
+                {"path": path, "type": "changed", "old": old, "new": new}
+            )
 
     return list_diffs, scalar_diffs
 
@@ -376,7 +396,7 @@ def _classify_cause(old_list: list[Any], new_list: list[Any]) -> str:
 
     if len(old_list) > len(new_list):
         # List shrunk → deduplication or relaxed matching
-        if all(not isinstance(item, (dict, list)) for item in old_list):
+        if all(not isinstance(item, dict | list) for item in old_list):
             old_counts = Counter(str(v) for v in old_list)
             has_dupes = any(c > 1 for c in old_counts.values())
             new_counts = Counter(str(v) for v in new_list)
@@ -432,7 +452,9 @@ def _format_yaml_item(item: Any, indent: int = 0) -> list[str]:
     return [f"{prefix}- {_format_yaml_value(item)}"]
 
 
-def _format_side_by_side(left: list[str], right: list[str], col_width: int = 38) -> list[str]:
+def _format_side_by_side(
+    left: list[str], right: list[str], col_width: int = 38
+) -> list[str]:
     """Format two column lists side-by-side.
 
     Args:
@@ -610,14 +632,16 @@ def _truncate(s: str, max_len: int = 80) -> str:
 
 def _format_value_short(val: Any, max_len: int = 80) -> str:
     """Render a value as a compact string, truncated to *max_len*."""
-    if isinstance(val, (dict, list)):
+    if isinstance(val, dict | list):
         s = json.dumps(val, sort_keys=True)
     else:
         s = _format_yaml_value(val)
     return _truncate(s, max_len)
 
 
-def _collapse_scalar_runs(diffs: list[dict[str, Any]], threshold: int = 5) -> list[dict[str, Any]]:
+def _collapse_scalar_runs(
+    diffs: list[dict[str, Any]], threshold: int = 5
+) -> list[dict[str, Any]]:
     """Collapse runs of scalar add/remove diffs from the same list into summaries.
 
     When a list has many individual scalar entries added/removed (e.g. 88
@@ -648,7 +672,9 @@ def _collapse_scalar_runs(diffs: list[dict[str, Any]], threshold: int = 5) -> li
     result = list(non_collapsible)
     for (parent, dtype), group_diffs in sorted(groups.items()):
         if len(group_diffs) >= threshold:
-            values = [d.get("old" if dtype == "removed" else "new") for d in group_diffs]
+            values = [
+                d.get("old" if dtype == "removed" else "new") for d in group_diffs
+            ]
             counts = Counter(str(v) for v in values)
             top_items = counts.most_common(5)
             summary_parts = [f"{v} \u00d7{c}" for v, c in top_items]
@@ -749,26 +775,44 @@ def _render_diff_tree(diffs: list[dict[str, Any]]) -> list[str]:
         dtype = d["type"]
 
         if dtype == "added":
-            val = _format_item_summary(d["new"]) if isinstance(d["new"], dict) else _format_value_short(d["new"])
+            val = (
+                _format_item_summary(d["new"])
+                if isinstance(d["new"], dict)
+                else _format_value_short(d["new"])
+            )
             lines.append(f"{indent}{C.GREEN}{leaf}: + {val}{C.RESET}")
         elif dtype == "removed":
-            val = _format_item_summary(d["old"]) if isinstance(d["old"], dict) else _format_value_short(d["old"])
+            val = (
+                _format_item_summary(d["old"])
+                if isinstance(d["old"], dict)
+                else _format_value_short(d["old"])
+            )
             lines.append(f"{indent}{C.RED}{leaf}: - {val}{C.RESET}")
         elif dtype == "changed":
             lines.append(f"{indent}{leaf}:")
-            lines.append(f"{indent}  {C.RED}old: {_format_value_short(d['old'])}{C.RESET}")
-            lines.append(f"{indent}  {C.GREEN}new: {_format_value_short(d['new'])}{C.RESET}")
+            lines.append(
+                f"{indent}  {C.RED}old: {_format_value_short(d['old'])}{C.RESET}"
+            )
+            lines.append(
+                f"{indent}  {C.GREEN}new: {_format_value_short(d['new'])}{C.RESET}"
+            )
         elif dtype == "type_changed":
             lines.append(f"{indent}{leaf}: type changed")
-            lines.append(f"{indent}  {C.RED}old ({type(d['old']).__name__}): {_format_value_short(d['old'])}{C.RESET}")
+            lines.append(
+                f"{indent}  {C.RED}old ({type(d['old']).__name__}): {_format_value_short(d['old'])}{C.RESET}"
+            )
             lines.append(
                 f"{indent}  {C.GREEN}new ({type(d['new']).__name__}): {_format_value_short(d['new'])}{C.RESET}"
             )
         elif dtype == "list_length":
-            lines.append(f"{indent}{leaf}: {C.RED}{d['old']} items{C.RESET} → {C.GREEN}{d['new']} items{C.RESET}")
+            lines.append(
+                f"{indent}{leaf}: {C.RED}{d['old']} items{C.RESET} → {C.GREEN}{d['new']} items{C.RESET}"
+            )
         elif dtype == "collapsed_scalars":
             color = C.RED if d["label"] == "removed" else C.GREEN
-            lines.append(f"{indent}{color}{leaf}: ({d['count']} {d['label']} scalars: {d['summary']}){C.RESET}")
+            lines.append(
+                f"{indent}{color}{leaf}: ({d['count']} {d['label']} scalars: {d['summary']}){C.RESET}"
+            )
 
         prev_segments = segments
 
@@ -821,7 +865,9 @@ def format_enhanced_diff(
             lines.append(f"  {light_rule}")
 
             # Compute list-level diff
-            only_old, only_new, changed_pairs, identical = _diff_list_items(old_list, new_list)
+            only_old, only_new, changed_pairs, identical = _diff_list_items(
+                old_list, new_list
+            )
             col_w = 38
 
             # Items only in old (removed)
@@ -846,7 +892,9 @@ def format_enhanced_diff(
 
             # Items with same identity but different nested content
             if changed_pairs:
-                lines.append(f"  {C.YELLOW}Changed ({len(changed_pairs)} item(s)):{C.RESET}")
+                lines.append(
+                    f"  {C.YELLOW}Changed ({len(changed_pairs)} item(s)):{C.RESET}"
+                )
 
                 for _idx, (old_item, new_item) in enumerate(changed_pairs):
                     identity = _item_identity(old_item)
@@ -860,14 +908,18 @@ def format_enhanced_diff(
                         lines.append(f"    {diff_count} difference(s):")
                         lines.extend(_render_diff_tree(leaf_diffs))
                     else:
-                        lines.append(f"    {C.GREEN}(no leaf-level differences){C.RESET}")
+                        lines.append(
+                            f"    {C.GREEN}(no leaf-level differences){C.RESET}"
+                        )
                     lines.append("")
 
                     # Verbose: also show full side-by-side
                     if verbose:
                         left_hdr = f"v{OLD_VERSION}:"
                         right_hdr = f"v{NEW_VERSION}:"
-                        lines.append(f"  {C.RED}{left_hdr:<{col_w}}{C.RESET} {C.GREEN}{right_hdr}{C.RESET}")
+                        lines.append(
+                            f"  {C.RED}{left_hdr:<{col_w}}{C.RESET} {C.GREEN}{right_hdr}{C.RESET}"
+                        )
                         left_lines = _format_yaml_item(old_item)
                         right_lines = _format_yaml_item(new_item)
                         sbs = _format_side_by_side(left_lines, right_lines, col_w)
@@ -877,7 +929,9 @@ def format_enhanced_diff(
 
             # Identical items summary
             if identical > 0:
-                lines.append(f"  {C.BOLD}({identical} identical item(s) not shown){C.RESET}")
+                lines.append(
+                    f"  {C.BOLD}({identical} identical item(s) not shown){C.RESET}"
+                )
 
             # Footer
             lines.append(f"  {C.BOLD}{heavy_rule}{C.RESET}")
@@ -924,8 +978,12 @@ def dump_yaml(data: dict[str, Any], path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description=(f"Compare nac-yaml merge output between v{OLD_VERSION} and v{NEW_VERSION}."),
-        epilog=("Exit codes: 0 = identical, 1 = differences found, 2 = error.\nRequires: Python 3.10+, uv"),
+        description=(
+            f"Compare nac-yaml merge output between v{OLD_VERSION} and v{NEW_VERSION}."
+        ),
+        epilog=(
+            "Exit codes: 0 = identical, 1 = differences found, 2 = error.\nRequires: Python 3.10+, uv"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -996,8 +1054,15 @@ def main() -> int:
             new_path = Path(td) / f"merged_v{NEW_VERSION}.yaml"
             dump_yaml(old_data, old_path)
             dump_yaml(new_data, new_path)
-            diff_result = subprocess.run(  # nosec B603
-                ["diff", "-u", f"--label=v{OLD_VERSION}", f"--label=v{NEW_VERSION}", str(old_path), str(new_path)],
+            diff_result = subprocess.run(  # nosec B603, B607
+                [
+                    "diff",
+                    "-u",
+                    f"--label=v{OLD_VERSION}",
+                    f"--label=v{NEW_VERSION}",
+                    str(old_path),
+                    str(new_path),
+                ],
                 capture_output=True,
                 text=True,
             )
@@ -1026,6 +1091,7 @@ def main() -> int:
         rc = 0 if len(diffs) == 0 else 1
 
     return rc
+
 
 if __name__ == "__main__":
     sys.exit(main())
