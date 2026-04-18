@@ -1,0 +1,52 @@
+---
+# Sample data: expected DIFFERENCES between versions
+#
+# Triggers both breaking changes from PR #34:
+#
+# Change 1 — Duplicate preservation:
+#   v1: deduplicate_list_items() post-processing merges duplicates globally
+#   v2: duplicates in ANY file disable merging for that list (concatenate)
+#
+# Change 2 — Relaxed matching:
+#   v1: not (unique_source and unique_dest) -> refuses merge if both unique
+#   v2: shared primitives match -> merges regardless of unique keys
+
+network:
+  # DIFF (change 2): shared "name" matches, but unique keys on both sides
+  #   v1: [{name: Ethernet1/1, vlan: 100}, {name: Ethernet1/1, port: 1}]
+  #   v2: [{name: Ethernet1/1, vlan: 100, port: 1}]
+  interfaces:
+    - name: Ethernet1/1
+      vlan: 100
+    - name: Ethernet1/2
+      speed: 10000
+
+  # DIFF (change 2): shared "id" matches, but unique keys on both sides
+  #   v1: [{id: 1, role: spine}, {id: 1, site: dc1}]
+  #   v2: [{id: 1, role: spine, site: dc1}]
+  devices:
+    - id: 1
+      role: spine
+    - id: 2
+      role: leaf
+
+  # DIFF (change 1): file1 has duplicate (sequence: 10 appears twice)
+  #   v1: dedup merges them -> [{sequence: 10, action: permit}, {sequence: 20, action: deny}]
+  #   v2: duplicates disable merging -> [{sequence: 10, ...}, {sequence: 10, ...}, {sequence: 20, ...}]
+  acl_entries:
+    - sequence: 10
+      action: permit
+    - sequence: 10
+      action: permit
+
+  # NO DIFF: file2 shares "prefix"+"next_hop", only file2 adds "metric"
+  routes:
+    - prefix: 10.0.0.0/8
+      next_hop: 192.168.1.1
+    - prefix: 172.16.0.0/12
+      next_hop: 192.168.1.1
+
+  # NO DIFF: same keys (id, name), only file2 adds "enabled"
+  vlans:
+    - id: 10
+      name: management

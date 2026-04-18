@@ -1,0 +1,27 @@
+---
+network:
+  domain: example.com
+
+  # Same keys (id, name) match -> merged; "enabled" unique to file2 only
+  vlans:
+    - id: 10
+      name: management
+      enabled: true
+    - id: 30
+      name: servers
+
+  # Only file2 has unique keys (description, mode) -> both versions merge
+  interfaces:
+    - name: Ethernet1/1
+      description: uplink
+      mode: trunk
+    - name: Ethernet1/3
+      description: server-link
+
+  # Primitive -> appended
+  dns_servers:
+    - 9.9.9.9
+
+  # Nested dict -> merged
+  ntp:
+    timezone: UTC

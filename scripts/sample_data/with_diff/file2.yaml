@@ -1,0 +1,32 @@
+---
+network:
+  # DIFF (change 2): "name" matches, but file2 has "port" / file1 has "vlan"
+  interfaces:
+    - name: Ethernet1/1
+      port: 1
+    - name: Ethernet1/2
+      mtu: 9216
+
+  # DIFF (change 2): "id" matches, but file2 has "site" / file1 has "role"
+  devices:
+    - id: 1
+      site: dc1
+    - id: 2
+      platform: nexus9000
+
+  # DIFF (change 1): file1 has duplicates, so v2 concatenates this list
+  acl_entries:
+    - sequence: 20
+      action: deny
+
+  # NO DIFF: shares "prefix"+"next_hop" with file1, adds "metric" (file2 only)
+  routes:
+    - prefix: 10.0.0.0/8
+      next_hop: 192.168.1.1
+      metric: 100
+
+  # NO DIFF: same keys match, "enabled" unique to file2 only
+  vlans:
+    - id: 10
+      name: management
+      enabled: true

@@ -1,0 +1,33 @@
+---
+# Sample data: expected NO differences between versions
+#
+# Patterns used (all produce identical results in both v1 and v2):
+#   - Same primitive keys on both sides, values match -> both merge
+#   - Only one side has unique primitive keys -> both merge
+#   - Primitive list items -> always appended
+#   - Nested dicts -> always merged recursively
+#   - Non-overlapping items -> appended
+
+network:
+  hostname: switch1
+
+  # Same keys (id, name) in both files -> both versions merge
+  vlans:
+    - id: 10
+      name: management
+    - id: 20
+      name: users
+
+  # file1 has only "name"; file2 adds description/mode (unique to file2 only)
+  interfaces:
+    - name: Ethernet1/1
+    - name: Ethernet1/2
+
+  # Primitive items -> always appended, never merged
+  dns_servers:
+    - 8.8.8.8
+    - 1.1.1.1
+
+  # Nested dict -> both versions merge recursively
+  ntp:
+    enabled: true
