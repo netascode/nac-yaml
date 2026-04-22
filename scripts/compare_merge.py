@@ -123,7 +123,9 @@ def resolve_paths(raw_paths: list[str]) -> list[Path]:
     return resolved
 
 
-def run_version(version: str, paths: list[Path], typ: str | None = None) -> dict[str, Any]:
+def run_version(
+    version: str, paths: list[Path], typ: str | None = None
+) -> dict[str, Any]:
     """Run load_yaml_files() with a specific nac-yaml version in an isolated uv env.
 
     Args:
