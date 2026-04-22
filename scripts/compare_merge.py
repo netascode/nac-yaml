@@ -64,7 +64,7 @@ _LOADER_SCRIPT_TEMPLATE = textwrap.dedent("""\
 
     def make_serializable(obj):
         if isinstance(obj, dict):
-            return {k: make_serializable(v) for k, v in obj.items()}
+            return {{k: make_serializable(v) for k, v in obj.items()}}
         if isinstance(obj, list):
             return [make_serializable(v) for v in obj]
         if isinstance(obj, bool):
