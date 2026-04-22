@@ -142,7 +142,11 @@ class EnvTag(yaml.YAMLObject):
         return str(cls(node.value))
 
 
-def load_yaml_files(paths: list[Path], deduplicate: bool = True) -> dict[str, Any]:
+def load_yaml_files(
+    paths: list[Path],
+    deduplicate: bool = True,
+    typ: str | None = None,
+) -> dict[str, Any]:
     """Load and merge YAML files from provided paths.
 
     Args:
@@ -151,6 +155,13 @@ def load_yaml_files(paths: list[Path], deduplicate: bool = True) -> dict[str, An
                     - If ANY file has duplicates in a list, that list is concatenated (no merging)
                     - If NO duplicates exist, matching dict items are merged across files
                     When False, simply concatenates all list items.
+        typ: Optional ruamel.yaml parser type passed to ``ruamel.yaml.YAML(typ=...)``.
+             Use ``"safe"`` to load native Python types (dict/list) instead of round-trip
+             containers.
+
+             Caveat: when ``typ`` is not round-trip (e.g. ``"safe"``), formatting-related
+             options like ``preserve_quotes`` do not apply and comments/quoting/style are not
+             preserved.
 
     Returns:
         Merged dictionary structure
@@ -188,7 +199,7 @@ def load_yaml_files(paths: list[Path], deduplicate: bool = True) -> dict[str, An
         Result: devices: [{name: switch1}, {name: switch1}, {name: switch1, port: 1/0/1}]  # all preserved
     """
     # Create YAML parser once and reuse for all files
-    y = yaml.YAML()
+    y = yaml.YAML(typ=typ) if typ is not None else yaml.YAML()
     y.preserve_quotes = True
     y.register_class(VaultTag)
     y.register_class(EnvTag)

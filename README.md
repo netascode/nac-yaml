@@ -5,6 +5,29 @@
 
 A Python library with common YAML utility functions supporting `Network as Code`.
 
+## Usage
+
+### Load and merge YAML files
+
+```python
+from pathlib import Path
+from nac_yaml.yaml import load_yaml_files
+
+# Default is ruamel's round-trip loader (preserves formatting internally).
+data = load_yaml_files([
+    Path("path/to/file1.yaml"),
+    Path("path/to/file2.yaml"),
+])
+
+# Use the safe loader to get native dict/list containers.
+data_safe = load_yaml_files([
+    Path("path/to/file1.yaml"),
+    Path("path/to/file2.yaml"),
+], typ="safe")
+```
+
+Note: when `typ` is not round-trip (e.g. `"safe"`), formatting features (quotes/comments/style) are not preserved.
+
 ## Installation
 
 ### Using uv (recommended)
