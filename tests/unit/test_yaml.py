@@ -37,7 +37,9 @@ def test_load_yaml_files(tmpdir: Path, typ: str | None) -> None:
     yaml.write_yaml_file(data, output_path)
     assert filecmp.cmp(output_path, result_path, shallow=False)
 
-    data = yaml.load_yaml_files([input_path_1, input_path_2], deduplicate=False, typ=typ)
+    data = yaml.load_yaml_files(
+        [input_path_1, input_path_2], deduplicate=False, typ=typ
+    )
     if typ == "safe":
         assert _is_only_dict_list_tree(data)
     yaml.write_yaml_file(data, output_path)
