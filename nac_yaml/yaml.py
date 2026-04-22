@@ -201,7 +201,6 @@ def load_yaml_files(
     # Create YAML parser once and reuse for all files
     y = yaml.YAML(typ=typ) if typ is not None else yaml.YAML()
     y.preserve_quotes = True
-
     y.register_class(VaultTag)
     y.register_class(EnvTag)
 
