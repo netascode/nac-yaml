@@ -13,7 +13,16 @@ from nac_yaml import yaml
 pytestmark = pytest.mark.unit
 
 
-def test_load_yaml_files(tmpdir: Path) -> None:
+def _is_only_dict_list_tree(value: Any) -> bool:
+    if isinstance(value, dict):
+        return all(_is_only_dict_list_tree(v) for v in value.values())
+    if isinstance(value, list):
+        return all(_is_only_dict_list_tree(v) for v in value)
+    return True
+
+
+@pytest.mark.parametrize("typ", [None, "rt", "safe"])
+def test_load_yaml_files(tmpdir: Path, typ: str | None) -> None:
     input_path_1 = Path("tests/unit/fixtures/data_merge/file1.yaml")
     input_path_2 = Path("tests/unit/fixtures/data_merge/file2.yaml")
     output_path = Path(tmpdir, "output.yaml")
@@ -22,22 +31,31 @@ def test_load_yaml_files(tmpdir: Path) -> None:
         "tests/unit/fixtures/data_merge/result_no_deduplicate.yaml"
     )
 
-    data = yaml.load_yaml_files([input_path_1, input_path_2])
+    data = yaml.load_yaml_files([input_path_1, input_path_2], typ=typ)
+    if typ == "safe":
+        assert _is_only_dict_list_tree(data)
     yaml.write_yaml_file(data, output_path)
     assert filecmp.cmp(output_path, result_path, shallow=False)
 
-    data = yaml.load_yaml_files([input_path_1, input_path_2], deduplicate=False)
+    data = yaml.load_yaml_files([input_path_1, input_path_2], deduplicate=False, typ=typ)
+    if typ == "safe":
+        assert _is_only_dict_list_tree(data)
     yaml.write_yaml_file(data, output_path)
     assert filecmp.cmp(output_path, result_no_deduplicate_path, shallow=False)
 
     input_path = Path("tests/unit/fixtures/data_vault/")
     os.environ["ANSIBLE_VAULT_ID"] = "dev"
     os.environ["ANSIBLE_VAULT_PASSWORD"] = "Password123"
-    data = yaml.load_yaml_files([input_path])
+    data = yaml.load_yaml_files([input_path], typ=typ)
+    if typ == "safe":
+        assert _is_only_dict_list_tree(data)
+    assert data["root"]["children"][0]["name"] == "ABC\n"
 
     input_path = Path("tests/unit/fixtures/data_env/")
     os.environ["ABC"] = "DEF"
-    data = yaml.load_yaml_files([input_path])
+    data = yaml.load_yaml_files([input_path], typ=typ)
+    if typ == "safe":
+        assert _is_only_dict_list_tree(data)
     assert data["root"]["children"][0]["name"] == "DEF"
 
 
