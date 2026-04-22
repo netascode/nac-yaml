@@ -80,7 +80,7 @@ _LOADER_SCRIPT_TEMPLATE = textwrap.dedent("""\
         return str(obj)
 
     paths = [Path(p) for p in sys.argv[1:]]
-    result = load_yaml_files(paths, deduplicate=True)
+    result = load_yaml_files(paths, deduplicate=True{typ_arg})
     json.dump(make_serializable(result), sys.stdout, indent=2, sort_keys=True)
 """)
 
@@ -123,12 +123,13 @@ def resolve_paths(raw_paths: list[str]) -> list[Path]:
     return resolved
 
 
-def run_version(version: str, paths: list[Path]) -> dict[str, Any]:
+def run_version(version: str, paths: list[Path], typ: str | None = None) -> dict[str, Any]:
     """Run load_yaml_files() with a specific nac-yaml version in an isolated uv env.
 
     Args:
         version: nac-yaml PyPI version string (e.g. "1.1.1").
         paths: Absolute paths to YAML files/directories.
+        typ: Optional ruamel.yaml parser type to pass to load_yaml_files() for the NEW version.
 
     Returns:
         Parsed JSON dict of the merged YAML output.
@@ -137,6 +138,12 @@ def run_version(version: str, paths: list[Path]) -> dict[str, Any]:
         SystemExit: On subprocess failure.
     """
     str_paths = [str(p) for p in paths]
+
+    if version == NEW_VERSION and typ is not None:
+        typ_arg = f", typ={typ!r}"
+    else:
+        typ_arg = ""
+
     cmd = [
         "uv",
         "run",
@@ -145,7 +152,7 @@ def run_version(version: str, paths: list[Path]) -> dict[str, Any]:
         f"nac-yaml=={version}",
         "python",
         "-c",
-        _LOADER_SCRIPT_TEMPLATE,
+        _LOADER_SCRIPT_TEMPLATE.format(typ_arg=typ_arg),
         *str_paths,
     ]
     try:
@@ -1017,6 +1024,14 @@ def main() -> int:
         action="store_true",
         help="Render both merge results as YAML and show unified diff (like diff -u)",
     )
+    parser.add_argument(
+        "--typ",
+        metavar="TYP",
+        help=(
+            "Pass ruamel.yaml typ to load_yaml_files() for the NEW version only "
+            '(e.g. "safe" for native dict/list)'
+        ),
+    )
     args = parser.parse_args()
 
     if args.diff and (args.json_output or args.raw):
@@ -1035,7 +1050,7 @@ def main() -> int:
     )
     with ThreadPoolExecutor(max_workers=2) as pool:
         future_old = pool.submit(run_version, OLD_VERSION, resolved)
-        future_new = pool.submit(run_version, NEW_VERSION, resolved)
+        future_new = pool.submit(run_version, NEW_VERSION, resolved, args.typ)
         old_data = future_old.result()
         new_data = future_new.result()
 
