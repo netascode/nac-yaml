@@ -1,6 +1,6 @@
 [project]
 name = "nac-yaml"
-version = "2.0.0b1"
+version = "2.0.0b2"
 description = "A Python library with common YAML utility functions supporting 'Network as Code'."
 license = { text = "MPL-2.0" }
 readme = "README.md"
