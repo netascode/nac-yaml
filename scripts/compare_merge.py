@@ -51,7 +51,7 @@ from pathlib import Path
 from typing import Any
 
 OLD_VERSION = "1.1.1"
-NEW_VERSION = "2.0.0a0"
+NEW_VERSION = "2.0.0b2"
 
 # Inline Python script executed inside each isolated uv environment.
 # Receives YAML paths as sys.argv[1:], loads them with load_yaml_files(),
