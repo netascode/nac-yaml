@@ -5,6 +5,7 @@ import importlib.util
 import logging
 import os
 import subprocess  # nosec B404
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -292,15 +293,13 @@ def _has_duplicates_in_list(items: list[Any]) -> bool:
         return False
 
     # Build inverted index: (key, value) -> [indices]
-    index: dict[tuple[str, Any], list[int]] = {}
+    index: dict[tuple[str, Any], list[int]] = defaultdict(list)
     for i, prims in enumerate(primitives_list):
         for k, v in prims.items():
             try:
-                kv = (k, v)
-                hash(kv)
+                index[(k, v)].append(i)
             except TypeError:
                 continue
-            index.setdefault(kv, []).append(i)
 
     # Check candidate pairs from buckets with 2+ entries
     checked: set[tuple[int, int]] = set()
@@ -344,17 +343,15 @@ def _merge_list_items_indexed(
         else:
             dest_primitives.append(None)
 
-    index: dict[tuple[str, Any], list[int]] = {}
+    index: dict[tuple[str, Any], list[int]] = defaultdict(list)
     for i, prims in enumerate(dest_primitives):
         if prims is None:
             continue
         for k, v in prims.items():
             try:
-                pair = (k, v)
-                hash(pair)
+                index[(k, v)].append(i)
             except TypeError:
                 continue
-            index.setdefault(pair, []).append(i)
 
     for source_item in source_items:
         if not isinstance(source_item, dict):
@@ -370,12 +367,11 @@ def _merge_list_items_indexed(
         candidate_set: set[int] = set()
         for k, v in src_prims.items():
             try:
-                pair = (k, v)
-                hash(pair)
+                bucket = index.get((k, v))
+                if bucket:
+                    candidate_set.update(bucket)
             except TypeError:
                 continue
-            if pair in index:
-                candidate_set.update(index[pair])
 
         # Check candidates in destination order (first-match semantics)
         matched = False
@@ -400,11 +396,9 @@ def _merge_list_items_indexed(
             dest_primitives.append(src_prims)
             for k, v in src_prims.items():
                 try:
-                    pair = (k, v)
-                    hash(pair)
+                    index[(k, v)].append(new_idx)
                 except TypeError:
                     continue
-                index.setdefault(pair, []).append(new_idx)
 
 
 def merge_list_item(
