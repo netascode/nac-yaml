@@ -6,12 +6,12 @@
 # requires-python = ">=3.10"
 # dependencies = ["ruamel.yaml"]
 # ///
-"""Compare YAML merge output between nac-yaml v1.1.1 and v2.0.0a0.
+"""Compare YAML merge output between nac-yaml v1.1.1 and v2.0.0b3.
 
-nac-yaml v2.0.0a0 changed the merge logic for load_yaml_files:
+nac-yaml v2.0.0b3 changed the merge logic for load_yaml_files:
   - Old (v1.1.1): Prevented merging dict list items when BOTH sides had
     unique primitive keys; deduplication was a post-processing pass.
-  - New (v2.0.0a0): Merges items as long as shared primitive keys match
+  - New (v2.0.0b3): Merges items as long as shared primitive keys match
     (regardless of unique keys); duplicate detection is integrated into
     the merge itself.
 
@@ -51,7 +51,7 @@ from pathlib import Path
 from typing import Any
 
 OLD_VERSION = "1.1.1"
-NEW_VERSION = "2.0.0b2"
+NEW_VERSION = "2.0.0b3"
 
 # Inline Python script executed inside each isolated uv environment.
 # Receives YAML paths as sys.argv[1:], loads them with load_yaml_files(),
