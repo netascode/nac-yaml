@@ -513,13 +513,12 @@ def merge_dict(
     return destination
 
 
-def write_yaml_file(data: dict[str, Any], path: Path, typ: str | None = None) -> None:
+def write_yaml_file(data: dict[str, Any], path: Path) -> None:
     """Write data structure to a YAML file with standard formatting.
 
     Args:
         data: Dictionary to write as YAML
         path: Path to output file
-        typ: Optional ruamel.yaml parser type passed to ``ruamel.yaml.YAML(typ=...)``.
 
     Formatting:
         - Explicit document start (---)
@@ -544,7 +543,7 @@ def write_yaml_file(data: dict[str, Any], path: Path, typ: str | None = None) ->
     """
     try:
         with open(path, "w") as fh:
-            y = yaml.YAML(typ=typ) if typ is not None else yaml.YAML()
+            y = yaml.YAML()
             y.explicit_start = True
             y.default_flow_style = False
             y.indent(mapping=2, sequence=4, offset=2)
