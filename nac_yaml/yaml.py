@@ -143,6 +143,95 @@ class EnvTag(yaml.YAMLObject):
         return str(cls(node.value))
 
 
+class _MergeContext:
+    """Per-run cache of destination lists' duplicate status for the fast merge.
+
+    Keyed by ``id(list)``; each entry keeps a strong reference to the list so
+    its id cannot be reused mid-run, plus an identity re-check for safety. A
+    stored status of ``None`` means "recompute on next read".
+    """
+
+    def __init__(self) -> None:
+        self.enabled = True
+        self._meta: dict[int, tuple[list[Any], bool | None]] = {}
+
+    def has_dup(self, lst: list[Any]) -> bool:
+        m = self._meta.get(id(lst))
+        if m is not None and m[0] is lst:
+            cached = m[1]
+            if cached is not None:
+                return cached
+        v = _has_duplicates_in_list(lst)
+        self._meta[id(lst)] = (lst, v)
+        return v
+
+    def set_dup(self, lst: list[Any], value: bool) -> None:
+        self._meta[id(lst)] = (lst, value)
+
+    def invalidate(self, lst: list[Any]) -> None:
+        self._meta[id(lst)] = (lst, None)
+
+
+def _contains_aliases(obj: Any) -> bool:
+    """Return True if any dict/list object is reachable by more than one path.
+
+    Detects YAML anchor/alias sharing (same mutable object referenced twice),
+    which makes per-list duplicate caching unsafe.
+    """
+    seen: set[int] = set()
+    stack = [obj]
+    while stack:
+        o = stack.pop()
+        if isinstance(o, (dict, list)):
+            i = id(o)
+            if i in seen:
+                return True
+            seen.add(i)
+            stack.extend(o.values() if isinstance(o, dict) else o)
+    return False
+
+
+def _merge_dict_cached(
+    source: dict[str, Any], destination: dict[str, Any], ctx: _MergeContext
+) -> dict[str, Any]:
+    """Semantics-identical twin of ``merge_dict`` (deduplicate=True) that reads
+    each destination list's duplicate status from ``ctx`` instead of rescanning.
+
+    Maintains the cache precisely: a dup-triggered concat marks the list dup
+    permanently; a merge pass that only appends keeps it dup-free; only a pass
+    that actually merged an item (detected via length delta) can introduce a
+    duplicate and triggers a one-off recompute.
+    """
+    if not source:
+        return destination
+    for key, value in source.items():
+        if key not in destination or destination[key] is None:
+            destination[key] = value
+        elif isinstance(value, dict):
+            if isinstance(destination[key], dict):
+                _merge_dict_cached(value, destination[key], ctx)
+        elif isinstance(value, list):
+            dest_list = destination[key]
+            if isinstance(dest_list, list):
+                if not value or not dest_list:
+                    if value:
+                        dest_list += value
+                        ctx.invalidate(dest_list)
+                elif _has_duplicates_in_list(value) or ctx.has_dup(dest_list):
+                    dest_list += value
+                    ctx.set_dup(dest_list, True)
+                else:
+                    before = len(dest_list)
+                    _merge_list_items_indexed(value, dest_list, True)
+                    if len(dest_list) - before < len(value):
+                        ctx.set_dup(dest_list, _has_duplicates_in_list(dest_list))
+                    else:
+                        ctx.set_dup(dest_list, False)
+        elif value is not None:
+            destination[key] = value
+    return destination
+
+
 def load_yaml_files(
     paths: list[Path],
     deduplicate: bool = True,
@@ -205,12 +294,29 @@ def load_yaml_files(
     y.register_class(VaultTag)
     y.register_class(EnvTag)
 
+    # Fast path keeps a per-run cache of each destination list's duplicate
+    # status (the dominant cost), active only for deduplicate=True and only
+    # while no YAML aliases (shared mutable objects) have been seen. Aliases
+    # would let a mutation via one reference invalidate another list's cached
+    # status, so their presence permanently disables the cache for the run.
+    ctx = _MergeContext() if deduplicate else None
+
+    def _merge_loaded(incoming: Any, data: dict[str, Any]) -> None:
+        if ctx is not None and ctx.enabled:
+            if _contains_aliases(incoming):
+                ctx.enabled = False
+                merge_dict(incoming, data, deduplicate)
+            else:
+                _merge_dict_cached(incoming, data, ctx)
+        else:
+            merge_dict(incoming, data, deduplicate)
+
     def _load_file(file_path: Path, data: dict[str, Any]) -> None:
         with open(file_path) as file:
             if file_path.suffix in [".yaml", ".yml"]:
                 data_yaml = file.read()
-                dict = y.load(data_yaml)
-                merge_dict(dict, data, deduplicate)
+                loaded = y.load(data_yaml)
+                _merge_loaded(loaded, data)
 
     result: dict[str, Any] = {}
     for path in paths:

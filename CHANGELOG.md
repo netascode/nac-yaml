@@ -1,3 +1,7 @@
+# Unreleased
+
+- Performance: `load_yaml_files()` now merges in near-linear time for data models split across many files by caching each destination list's duplicate status incrementally instead of rescanning the whole merged structure on every file. Output is byte-identical to the previous implementation. The optimization is automatically disabled (falling back to the original algorithm) for any file containing YAML aliases/anchors that share mutable objects.
+
 # 2.0.0
 
 - BREAKING CHANGE: Rework list merge logic — within-file duplicates are now preserved; if any file contains duplicate dict items in a list, merging is disabled for that entire list and items are concatenated instead
