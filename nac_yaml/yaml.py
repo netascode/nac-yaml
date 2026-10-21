@@ -209,13 +209,23 @@ def load_yaml_files(
         with open(file_path) as file:
             if file_path.suffix in [".yaml", ".yml"]:
                 data_yaml = file.read()
-                dict = y.load(data_yaml)
-                merge_dict(dict, data, deduplicate)
+                parsed = y.load(data_yaml)
+                if parsed is None:
+                    logger.debug("Skipping empty or comment-only file: %s", file_path)
+                    return
+                if not isinstance(parsed, dict):
+                    logger.warning(
+                        "Skipping file with non-mapping root (%s): %s",
+                        type(parsed).__name__,
+                        file_path,
+                    )
+                    return
+                merge_dict(parsed, data, deduplicate)
 
     result: dict[str, Any] = {}
     for path in paths:
         if os.path.isfile(path):
-            _load_file(path, result)
+            _load_file(Path(path), result)
         else:
             for dir, _subdir, files in os.walk(path):
                 for filename in files:

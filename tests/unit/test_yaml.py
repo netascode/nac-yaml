@@ -233,3 +233,35 @@ def test_merge_list_item(
 ) -> None:
     yaml.merge_list_item(source_item, destination)
     assert destination == expected
+
+
+def test_load_yaml_files_comment_only(tmpdir: Path) -> None:
+    """Comment-only YAML file should return empty dict."""
+    p = Path(tmpdir, "comments.yaml")
+    p.write_text("# just a comment\n# another comment\n")
+    result = yaml.load_yaml_files([p])
+    assert result == {}
+
+
+def test_load_yaml_files_empty_file(tmpdir: Path) -> None:
+    """Empty (0-byte) YAML file should return empty dict."""
+    p = Path(tmpdir, "empty.yaml")
+    p.write_text("")
+    result = yaml.load_yaml_files([p])
+    assert result == {}
+
+
+def test_load_yaml_files_root_list(tmpdir: Path) -> None:
+    """Root-level list YAML file should be skipped with warning."""
+    p = Path(tmpdir, "list.yaml")
+    p.write_text("- item1\n- item2\n")
+    result = yaml.load_yaml_files([p])
+    assert result == {}
+
+
+def test_load_yaml_files_mixed_dir(tmpdir: Path) -> None:
+    """Directory with comment-only and valid files returns only valid data."""
+    Path(tmpdir, "comments.yaml").write_text("# comment\n")
+    Path(tmpdir, "valid.yaml").write_text("key: value\n")
+    result = yaml.load_yaml_files([Path(tmpdir)])
+    assert result == {"key": "value"}

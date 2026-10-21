@@ -1,3 +1,7 @@
+# Unreleased
+
+- Fix `load_yaml_files()` failing on empty or comment-only YAML files; these are now skipped, and files with a non-mapping root (e.g. a list) are skipped with a warning
+
 # 2.0.0
 
 - BREAKING CHANGE: Rework list merge logic — within-file duplicates are now preserved; if any file contains duplicate dict items in a list, merging is disabled for that entire list and items are concatenated instead
