@@ -3,6 +3,7 @@
 
 import filecmp
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,17 @@ def test_load_yaml_files(tmpdir: Path, typ: str | None) -> None:
     yaml.write_yaml_file(data, output_path)
     assert filecmp.cmp(output_path, result_no_deduplicate_path, shallow=False)
 
+    input_path = Path("tests/unit/fixtures/data_env/")
+    os.environ["ABC"] = "DEF"
+    data = yaml.load_yaml_files([input_path], typ=typ)
+    if typ == "safe":
+        assert _is_only_dict_list_tree(data)
+    assert data["root"]["children"][0]["name"] == "DEF"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="ansible-core requires POSIX")
+@pytest.mark.parametrize("typ", [None, "rt", "safe"])
+def test_load_yaml_files_vault(typ: str | None) -> None:
     input_path = Path("tests/unit/fixtures/data_vault/")
     os.environ["ANSIBLE_VAULT_ID"] = "dev"
     os.environ["ANSIBLE_VAULT_PASSWORD"] = "Password123"
@@ -52,13 +64,6 @@ def test_load_yaml_files(tmpdir: Path, typ: str | None) -> None:
     if typ == "safe":
         assert _is_only_dict_list_tree(data)
     assert data["root"]["children"][0]["name"] == "ABC\n"
-
-    input_path = Path("tests/unit/fixtures/data_env/")
-    os.environ["ABC"] = "DEF"
-    data = yaml.load_yaml_files([input_path], typ=typ)
-    if typ == "safe":
-        assert _is_only_dict_list_tree(data)
-    assert data["root"]["children"][0]["name"] == "DEF"
 
 
 @pytest.mark.parametrize(

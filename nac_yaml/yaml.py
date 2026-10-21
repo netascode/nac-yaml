@@ -76,11 +76,11 @@ class VaultTag(yaml.YAMLObject):
         return ""
 
     @classmethod
-    def from_yaml(cls, loader: Any, node: Any) -> str:
+    def from_yaml(cls, constructor: Any, node: Any) -> str:
         """Construct VaultTag from YAML node.
 
         Args:
-            loader: YAML loader instance
+            constructor: YAML constructor instance
             node: YAML node containing vault content
 
         Returns:
@@ -130,11 +130,11 @@ class EnvTag(yaml.YAMLObject):
         return env
 
     @classmethod
-    def from_yaml(cls, loader: Any, node: Any) -> str:
+    def from_yaml(cls, constructor: Any, node: Any) -> str:
         """Construct EnvTag from YAML node.
 
         Args:
-            loader: YAML loader instance
+            constructor: YAML constructor instance
             node: YAML node containing environment variable name
 
         Returns:
@@ -378,7 +378,7 @@ def _merge_list_items_indexed(
         for k, v in src_prims.items():
             try:
                 bucket = index.get((k, v))
-                if bucket:
+                if bucket is not None:
                     candidate_set.update(bucket)
             except TypeError:
                 continue
