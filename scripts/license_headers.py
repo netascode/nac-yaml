@@ -26,9 +26,6 @@ from pathlib import Path
 EXPECTED_SPDX = "# SPDX-License-Identifier: MPL-2.0"
 EXPECTED_COPYRIGHT = "# Copyright (c) 2025 Daniel Schmidt"
 
-# Files with a special non-SPDX header
-EXCLUDED = {Path("nac_yaml/ansible_vault.py")}
-
 
 def tracked_python_files() -> list[Path]:
     """Return all git-tracked '*.py' files relative to the repo root."""
@@ -96,8 +93,6 @@ def main(argv: list[str] | None = None) -> int:
         if not path.is_file():
             print(f"ERROR: not a regular file: {path}", file=sys.stderr)
             failed.append(path)
-            continue
-        if path in EXCLUDED:
             continue
         if path.stat().st_size == 0 or not path.read_text(encoding="utf-8").strip():
             continue

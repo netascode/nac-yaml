@@ -506,10 +506,16 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
+vault = [
+    { name = "ansible-core", version = "2.17.14", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and sys_platform != 'win32'" },
+    { name = "ansible-core", version = "2.19.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*' and sys_platform != 'win32'" },
+    { name = "ansible-core", version = "2.21.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and sys_platform != 'win32'" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "ansible-core", marker = "sys_platform != 'win32' and extra == 'dev'", specifier = ">=2.17.6" },
+    { name = "ansible-core", marker = "sys_platform != 'win32' and extra == 'vault'", specifier = ">=2.17.6" },
     { name = "bandit", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=1.9.1" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.1" },
@@ -519,7 +525,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.5" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.78" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["vault", "dev"]
 
 [[package]]
 name = "nodeenv"

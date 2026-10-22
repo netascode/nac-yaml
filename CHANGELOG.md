@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Fix `!vault` decryption ignoring `ANSIBLE_VAULT_PASSWORD`; values are now decrypted with the configured vault password. Values encrypted with the content of `ansible_vault.py` as password (e.g. copied from test fixtures) are no longer decrypted
+- Decrypt all `!vault` values of all files in a single batch in a separate process; ansible-core is used from the current environment or from the `ansible-vault` command on `PATH`
+- Raise `VaultError` if vault values of an explicitly provided file cannot be decrypted; files found in directories are skipped with a warning that now includes the underlying error
+- Add optional `vault` extra (`pip install nac-yaml[vault]`)
+- Remove the unused `nac_yaml/ansible_vault.py` vault password script
 - Fix `load_yaml_files()` failing on empty or comment-only YAML files; these are now skipped, and files with a non-mapping root (e.g. a list) are skipped with a warning
 
 ## 2.0.0

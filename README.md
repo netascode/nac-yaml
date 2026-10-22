@@ -28,6 +28,25 @@ data_safe = load_yaml_files([
 
 Note: when `typ` is not round-trip (e.g. `"safe"`), formatting features (quotes/comments/style) are not preserved.
 
+### Ansible Vault encrypted values
+
+Values encrypted with [Ansible Vault](https://docs.ansible.com/ansible/latest/vault_guide/index.html) can be used with the `!vault` tag:
+
+```yaml
+password: !vault |
+  $ANSIBLE_VAULT;1.2;AES256;dev
+  6535616566336139303566666336633163663431306337356461633439626638...
+```
+
+The vault password is read from the `ANSIBLE_VAULT_PASSWORD` environment variable, `ANSIBLE_VAULT_ID` is optional:
+
+```bash
+export ANSIBLE_VAULT_ID=dev
+export ANSIBLE_VAULT_PASSWORD=Password123
+```
+
+Decryption requires `ansible-core`, either installed in the same Python environment (`pip install nac-yaml[vault]`) or available as `ansible-vault` command on `PATH`. All values are decrypted in a single batch after parsing. If a value cannot be decrypted, `load_yaml_files()` raises a `VaultError` for explicitly provided files, while files found in directories are skipped with a warning. Ansible Vault is not supported on Windows.
+
 ## Installation
 
 ### Using uv (recommended)

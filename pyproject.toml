@@ -37,6 +37,10 @@ repository = "https://github.com/netascode/nac-yaml"
 documentation = "https://github.com/netascode/nac-yaml"
 
 [project.optional-dependencies]
+vault = [
+    # ansible-core does not run on Windows
+    "ansible-core>=2.17.6; sys_platform != 'win32'",
+]
 dev = [
     # ansible-core does not run on Windows; the vault tests are skipped there
     "ansible-core>=2.17.6; sys_platform != 'win32'",
@@ -70,15 +74,9 @@ python-version = "3.10"
 # typing.override requires Python 3.12+
 "missing-override-decorator" = "ignore"
 
-[tool.ty.src]
-exclude = ["nac_yaml/ansible_vault.py"]  # Special file with non-standard formatting
-
 [tool.ruff]
 target-version = "py310"
 line-length = 88
-extend-exclude = [
-    "nac_yaml/ansible_vault.py",  # Special file with non-standard formatting
-]
 
 [tool.ruff.lint]
 select = [
@@ -96,7 +94,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"nac_yaml/ansible_vault.py" = ["ALL"]  # Special file with non-standard formatting
 
 [tool.ruff.lint.isort]
 known-first-party = ["nac_yaml"]
