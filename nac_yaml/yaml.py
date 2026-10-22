@@ -2,9 +2,13 @@
 # Copyright (c) 2025 Daniel Schmidt
 
 import importlib.util
+import json
 import logging
 import os
+import re
+import shutil
 import subprocess  # nosec B404
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -13,11 +17,20 @@ from ruamel import yaml
 
 logger = logging.getLogger(__name__)
 
+VAULT_HELPER_PATH = Path(__file__).with_name("_vault_helper.py")
+VAULT_HELPER_TIMEOUT = 120
+
+
+class VaultError(Exception):
+    """Raised when Ansible Vault encrypted values cannot be decrypted."""
+
 
 class VaultTag(yaml.YAMLObject):
     """Custom YAML tag handler for Ansible Vault encrypted values.
 
-    Handles !vault tags in YAML files by decrypting them using ansible-vault CLI.
+    Handles !vault tags in YAML files. Parsing a !vault tag only records the
+    encrypted content; all values are decrypted in a single batch by
+    ``load_yaml_files`` after all files have been parsed.
 
     Attributes:
         yaml_tag: The YAML tag string "!vault"
@@ -33,9 +46,9 @@ class VaultTag(yaml.YAMLObject):
           663662346662316662616662346662316...
 
     Security:
-        - Requires ansible-vault CLI tool to be installed
-        - Uses subprocess to call ansible-vault decrypt
-        - Vault password must be provided via environment variable
+        - Requires ansible-core, either in the current Python environment or
+          as an ``ansible-vault`` executable on PATH
+        - Decryption runs in a separate process; the password is passed via stdin
     """
 
     yaml_tag = "!vault"
@@ -49,44 +62,183 @@ class VaultTag(yaml.YAMLObject):
         self.value = v
 
     def __repr__(self) -> str:
-        """Decrypt and return the vault value.
-
-        Returns:
-            Decrypted string if successful, empty string if vault spec not found
-
-        Raises:
-            CalledProcessError: If ansible-vault decrypt fails
-        """
-        spec = importlib.util.find_spec("nac_yaml.ansible_vault")
-        if spec:
-            if "ANSIBLE_VAULT_ID" in os.environ:
-                vault_id = os.environ["ANSIBLE_VAULT_ID"] + "@" + str(spec.origin)
-            else:
-                vault_id = str(spec.origin)
-            t = subprocess.check_output(  # nosec B603, B607
-                [
-                    "ansible-vault",
-                    "decrypt",
-                    "--vault-id",
-                    vault_id,
-                ],
-                input=self.value.encode(),
-            )
-            return t.decode()
-        return ""
+        """Return a representation without the encrypted content."""
+        return "VaultTag(...)"
 
     @classmethod
-    def from_yaml(cls, loader: Any, node: Any) -> str:
+    def from_yaml(cls, constructor: Any, node: Any) -> "VaultTag":
         """Construct VaultTag from YAML node.
 
         Args:
-            loader: YAML loader instance
+            constructor: YAML constructor instance
             node: YAML node containing vault content
 
         Returns:
-            String representation of the decrypted value
+            VaultTag placeholder, replaced by the decrypted value after loading
         """
-        return str(cls(node.value))
+        return cls(node.value)
+
+
+def _find_vault_python() -> str:
+    """Find a Python interpreter that has ansible-core installed.
+
+    Uses the current interpreter if ansible-core is importable, otherwise the
+    interpreter of the ``ansible-vault`` executable found on PATH.
+
+    Returns:
+        Path to the Python interpreter
+
+    Raises:
+        VaultError: If no interpreter with ansible-core can be found
+    """
+    if importlib.util.find_spec("ansible") is not None:
+        return sys.executable
+    ansible_vault = shutil.which("ansible-vault")
+    if ansible_vault is not None:
+        # Console scripts of venvs, pipx, uv tools and Homebrew (after resolving
+        # symlinks) are located next to the interpreter they belong to
+        script = Path(ansible_vault).resolve()
+        for name in ("python3", "python"):
+            if (script.parent / name).is_file():
+                return str(script.parent / name)
+        python = _interpreter_from_script(script)
+        if python is not None:
+            return python
+    raise VaultError(
+        "ansible-core is required to decrypt !vault values: install ansible-core "
+        "in this environment or make the ansible-vault command available on PATH"
+    )
+
+
+def _interpreter_from_script(script: Path) -> str | None:
+    """Extract the Python interpreter from a console script's shebang.
+
+    Supports absolute shebangs (``#!/path/to/python``), ``#!/usr/bin/env python3``
+    and the ``#!/bin/sh`` exec trampoline with an absolute interpreter path used by
+    pip for long or quoted paths.
+
+    Args:
+        script: Path to the console script
+
+    Returns:
+        Path to the Python interpreter, or None if it cannot be determined
+    """
+    try:
+        with open(script, encoding="utf-8") as f:
+            head = [f.readline() for _ in range(3)]
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not head[0].startswith("#!"):
+        return None
+    args = head[0][2:].split()
+    if not args:
+        return None
+    if Path(args[0]).name == "sh":
+        match = re.match(r"""'''exec' (["']?)(/.+?)\1 "\$0" "\$@"$""", head[1].strip())
+        return str(match.group(2)) if match else None
+    if Path(args[0]).name == "env" and len(args) > 1:
+        return shutil.which(args[-1])
+    return args[0]
+
+
+def _decrypt_vault_values(values: list[str]) -> dict[str, str | VaultError]:
+    """Decrypt Ansible Vault values in a single helper process.
+
+    Args:
+        values: Encrypted vault content strings
+
+    Returns:
+        Mapping of each encrypted value to its decrypted value, or to a
+        VaultError if that value could not be decrypted
+    """
+    try:
+        password = os.environ.get("ANSIBLE_VAULT_PASSWORD")
+        if password is None:
+            raise VaultError("ANSIBLE_VAULT_PASSWORD environment variable is not set")
+        request = {
+            "vault_id": os.environ.get("ANSIBLE_VAULT_ID", "default"),
+            # Strip trailing line breaks like ansible-vault does for password scripts
+            "password": password.rstrip("\r\n"),
+            "values": values,
+        }
+        # Run with an explicit interpreter and script path in isolated mode (-I),
+        # so neither PYTHON* variables nor the current directory affect imports.
+        # The password is passed via stdin only, not via arguments or environment.
+        env = {k: v for k, v in os.environ.items() if k != "ANSIBLE_VAULT_PASSWORD"}
+        try:
+            proc = subprocess.run(  # nosec B603
+                [_find_vault_python(), "-I", str(VAULT_HELPER_PATH)],
+                input=json.dumps(request).encode(),
+                capture_output=True,
+                env=env,
+                timeout=VAULT_HELPER_TIMEOUT,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise VaultError(f"Vault helper process failed: {e}") from e
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode(errors="replace").strip()
+            raise VaultError(f"Vault helper process failed: {stderr[-500:]}")
+        return _parse_vault_response(values, proc.stdout)
+    except VaultError as e:
+        return dict.fromkeys(values, e)
+
+
+def _parse_vault_response(
+    values: list[str], stdout: bytes
+) -> dict[str, str | VaultError]:
+    """Parse the vault helper response.
+
+    Args:
+        values: Encrypted vault content strings sent to the helper
+        stdout: Raw output of the helper process
+
+    Returns:
+        Mapping of each encrypted value to its decrypted value or VaultError
+
+    Raises:
+        VaultError: If the helper reported an error or the response is invalid
+    """
+    try:
+        response = json.loads(stdout)
+        if "error" in response:
+            raise VaultError(str(response["error"]))
+        result: dict[str, str | VaultError] = {}
+        for value, item in zip(values, response["results"], strict=True):
+            if item["ok"]:
+                result[value] = str(item["value"])
+            else:
+                result[value] = VaultError(
+                    f"Could not decrypt vault value: {item['error']}"
+                )
+        return result
+    except (ValueError, KeyError, TypeError) as e:
+        raise VaultError(f"Invalid response from vault helper: {e}") from e
+
+
+def _collect_vault_values(node: Any, values: set[str]) -> None:
+    """Recursively collect the encrypted content of all VaultTag placeholders."""
+    if isinstance(node, VaultTag):
+        values.add(node.value)
+    elif isinstance(node, dict):
+        for v in node.values():
+            _collect_vault_values(v, values)
+    elif isinstance(node, list):
+        for v in node:
+            _collect_vault_values(v, values)
+
+
+def _resolve_vault_values(node: Any, decrypted: dict[str, str | VaultError]) -> Any:
+    """Recursively replace VaultTag placeholders with their decrypted values."""
+    if isinstance(node, VaultTag):
+        return decrypted[node.value]
+    if isinstance(node, dict):
+        for k, v in node.items():
+            node[k] = _resolve_vault_values(v, decrypted)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            node[i] = _resolve_vault_values(v, decrypted)
+    return node
 
 
 class EnvTag(yaml.YAMLObject):
@@ -130,11 +282,11 @@ class EnvTag(yaml.YAMLObject):
         return env
 
     @classmethod
-    def from_yaml(cls, loader: Any, node: Any) -> str:
+    def from_yaml(cls, constructor: Any, node: Any) -> str:
         """Construct EnvTag from YAML node.
 
         Args:
-            loader: YAML loader instance
+            constructor: YAML constructor instance
             node: YAML node containing environment variable name
 
         Returns:
@@ -143,93 +295,47 @@ class EnvTag(yaml.YAMLObject):
         return str(cls(node.value))
 
 
-class _MergeContext:
-    """Per-run cache of destination lists' duplicate status for the fast merge.
+class _DuplicateCache:
+    """Cache of the duplicate status of lists during a single load_yaml_files() run.
 
-    Keyed by ``id(list)``; each entry keeps a strong reference to the list so
-    its id cannot be reused mid-run, plus an identity re-check for safety. A
-    stored status of ``None`` means "recompute on next read".
+    Entries are keyed by ``id()`` and hold a reference to the list, so that the
+    id cannot be reused by another list while the entry exists.
     """
 
     def __init__(self) -> None:
-        self.enabled = True
-        self._meta: dict[int, tuple[list[Any], bool | None]] = {}
+        self._entries: dict[int, tuple[list[Any], bool]] = {}
 
-    def has_dup(self, lst: list[Any]) -> bool:
-        m = self._meta.get(id(lst))
-        if m is not None and m[0] is lst:
-            cached = m[1]
-            if cached is not None:
-                return cached
-        v = _has_duplicates_in_list(lst)
-        self._meta[id(lst)] = (lst, v)
-        return v
+    def has_duplicates(self, items: list[Any]) -> bool:
+        entry = self._entries.get(id(items))
+        if entry is not None:
+            return entry[1]
+        value = _has_duplicates_in_list(items)
+        self.set(items, value)
+        return value
 
-    def set_dup(self, lst: list[Any], value: bool) -> None:
-        self._meta[id(lst)] = (lst, value)
+    def set(self, items: list[Any], value: bool) -> None:
+        self._entries[id(items)] = (items, value)
 
-    def invalidate(self, lst: list[Any]) -> None:
-        self._meta[id(lst)] = (lst, None)
+    def invalidate(self, items: list[Any]) -> None:
+        self._entries.pop(id(items), None)
 
 
-def _contains_aliases(obj: Any) -> bool:
-    """Return True if any dict/list object is reachable by more than one path.
+def _contains_aliases(node: Any) -> bool:
+    """Check if the same dict or list object is reachable via multiple paths.
 
-    Detects YAML anchor/alias sharing (same mutable object referenced twice),
-    which makes per-list duplicate caching unsafe.
+    This is the case for YAML aliases (e.g. ``*anchor`` or ``<<: *anchor``).
+    Aliases cannot span multiple files, so checking each file is sufficient.
     """
     seen: set[int] = set()
-    stack = [obj]
+    stack = [node]
     while stack:
-        o = stack.pop()
-        if isinstance(o, (dict, list)):
-            i = id(o)
-            if i in seen:
+        current = stack.pop()
+        if isinstance(current, dict | list):
+            if id(current) in seen:
                 return True
-            seen.add(i)
-            stack.extend(o.values() if isinstance(o, dict) else o)
+            seen.add(id(current))
+            stack.extend(current.values() if isinstance(current, dict) else current)
     return False
-
-
-def _merge_dict_cached(
-    source: dict[str, Any], destination: dict[str, Any], ctx: _MergeContext
-) -> dict[str, Any]:
-    """Semantics-identical twin of ``merge_dict`` (deduplicate=True) that reads
-    each destination list's duplicate status from ``ctx`` instead of rescanning.
-
-    Maintains the cache precisely: a dup-triggered concat marks the list dup
-    permanently; a merge pass that only appends keeps it dup-free; only a pass
-    that actually merged an item (detected via length delta) can introduce a
-    duplicate and triggers a one-off recompute.
-    """
-    if not source:
-        return destination
-    for key, value in source.items():
-        if key not in destination or destination[key] is None:
-            destination[key] = value
-        elif isinstance(value, dict):
-            if isinstance(destination[key], dict):
-                _merge_dict_cached(value, destination[key], ctx)
-        elif isinstance(value, list):
-            dest_list = destination[key]
-            if isinstance(dest_list, list):
-                if not value or not dest_list:
-                    if value:
-                        dest_list += value
-                        ctx.invalidate(dest_list)
-                elif _has_duplicates_in_list(value) or ctx.has_dup(dest_list):
-                    dest_list += value
-                    ctx.set_dup(dest_list, True)
-                else:
-                    before = len(dest_list)
-                    _merge_list_items_indexed(value, dest_list, True)
-                    if len(dest_list) - before < len(value):
-                        ctx.set_dup(dest_list, _has_duplicates_in_list(dest_list))
-                    else:
-                        ctx.set_dup(dest_list, False)
-        elif value is not None:
-            destination[key] = value
-    return destination
 
 
 def load_yaml_files(
@@ -255,6 +361,14 @@ def load_yaml_files(
 
     Returns:
         Merged dictionary structure
+
+    Raises:
+        VaultError: If !vault values in an explicitly provided file cannot be
+            decrypted. Files found in directories are skipped with a warning instead.
+
+    Vault values:
+        All !vault values of all files are decrypted in a single batch before
+        merging, using ANSIBLE_VAULT_PASSWORD and the optional ANSIBLE_VAULT_ID.
 
     Behavior with deduplicate=True:
         - Preserves ALL duplicate items within ANY file
@@ -294,41 +408,74 @@ def load_yaml_files(
     y.register_class(VaultTag)
     y.register_class(EnvTag)
 
-    # Fast path keeps a per-run cache of each destination list's duplicate
-    # status (the dominant cost), active only for deduplicate=True and only
-    # while no YAML aliases (shared mutable objects) have been seen. Aliases
-    # would let a mutation via one reference invalidate another list's cached
-    # status, so their presence permanently disables the cache for the run.
-    ctx = _MergeContext() if deduplicate else None
-
-    def _merge_loaded(incoming: Any, data: dict[str, Any]) -> None:
-        if ctx is not None and ctx.enabled:
-            if _contains_aliases(incoming):
-                ctx.enabled = False
-                merge_dict(incoming, data, deduplicate)
-            else:
-                _merge_dict_cached(incoming, data, ctx)
-        else:
-            merge_dict(incoming, data, deduplicate)
-
-    def _load_file(file_path: Path, data: dict[str, Any]) -> None:
+    def _parse_file(file_path: Path) -> dict[str, Any] | None:
+        if file_path.suffix not in [".yaml", ".yml"]:
+            return None
         with open(file_path) as file:
-            if file_path.suffix in [".yaml", ".yml"]:
-                data_yaml = file.read()
-                loaded = y.load(data_yaml)
-                _merge_loaded(loaded, data)
+            parsed = y.load(file.read())
+        if parsed is None:
+            logger.debug("Skipping empty or comment-only file: %s", file_path)
+            return None
+        if not isinstance(parsed, dict):
+            logger.warning(
+                "Skipping file with non-mapping root (%s): %s",
+                type(parsed).__name__,
+                file_path,
+            )
+            return None
+        return parsed
 
-    result: dict[str, Any] = {}
+    # Parse all files first. Errors in explicitly provided files are raised,
+    # files found in directories are skipped with a warning.
+    documents: list[tuple[Path, dict[str, Any], bool]] = []
     for path in paths:
         if os.path.isfile(path):
-            _load_file(path, result)
+            parsed = _parse_file(Path(path))
+            if parsed is not None:
+                documents.append((Path(path), parsed, True))
         else:
             for dir, _subdir, files in os.walk(path):
                 for filename in files:
+                    file_path = Path(dir, filename)
                     try:
-                        _load_file(Path(dir, filename), result)
-                    except:  # noqa: E722
-                        logger.warning(f"Could not load file: {filename}")
+                        parsed = _parse_file(file_path)
+                    except Exception as e:
+                        logger.warning("Could not load file %s: %s", file_path, e)
+                        continue
+                    if parsed is not None:
+                        documents.append((file_path, parsed, False))
+
+    # Decrypt all vault values of all files in a single batch before merging,
+    # so that merging operates on the decrypted values
+    document_vault_values: list[set[str]] = []
+    for _file_path, parsed, _explicit in documents:
+        values: set[str] = set()
+        _collect_vault_values(parsed, values)
+        document_vault_values.append(values)
+    all_vault_values = set().union(*document_vault_values)
+    decrypted = (
+        _decrypt_vault_values(sorted(all_vault_values)) if all_vault_values else {}
+    )
+
+    # Cache the duplicate status of merged lists across files, so that merging a
+    # file only checks the list items it changed instead of rescanning whole
+    # lists. Merging a file with YAML aliases could change a cached list via
+    # another reference, so the cache is disabled from then on.
+    cache = _DuplicateCache() if deduplicate else None
+    result: dict[str, Any] = {}
+    for (file_path, parsed, explicit), values in zip(
+        documents, document_vault_values, strict=True
+    ):
+        errors = [e for v in values if isinstance(e := decrypted[v], VaultError)]
+        if errors:
+            if explicit:
+                raise VaultError(f"{file_path}: {errors[0]}") from errors[0]
+            logger.warning("Could not load file %s: %s", file_path, errors[0])
+            continue
+        document = _resolve_vault_values(parsed, decrypted)
+        if cache is not None and _contains_aliases(document):
+            cache = None
+        _merge_dict(document, result, deduplicate, cache)
     return result
 
 
@@ -431,15 +578,78 @@ def _has_duplicates_in_list(items: list[Any]) -> bool:
     return False
 
 
+def _has_duplicates_involving(items: list[Any], indices: list[int]) -> bool:
+    """Check if any dict item at the given indices matches another dict item.
+
+    Uses the same matching logic as _has_duplicates_in_list(), but only checks
+    pairs involving the given items. If a list without duplicates had only the
+    items at these indices modified, only such pairs can have become duplicates.
+
+    Args:
+        items: List to check for duplicates
+        indices: Indices of the items to check against all other items
+
+    Returns:
+        True if any of the given items matches another dict item, False otherwise
+    """
+    if not indices:
+        return False
+
+    primitives_list: list[dict[str, Any] | None] = [
+        _extract_primitives(item) if isinstance(item, dict) else None for item in items
+    ]
+
+    # Build inverted index: (key, value) -> [indices]
+    index: dict[tuple[str, Any], list[int]] = defaultdict(list)
+    for i, prims in enumerate(primitives_list):
+        if prims is None:
+            continue
+        for k, v in prims.items():
+            try:
+                index[(k, v)].append(i)
+            except TypeError:
+                continue
+
+    for i in set(indices):
+        prims = primitives_list[i]
+        if prims is None:
+            continue
+        candidates: set[int] = set()
+        for k, v in prims.items():
+            try:
+                bucket = index.get((k, v))
+                if bucket is not None:
+                    candidates.update(bucket)
+            except TypeError:
+                continue
+        candidates.discard(i)
+        for j in candidates:
+            other = primitives_list[j]
+            if other is None:
+                continue
+            shared_keys = prims.keys() & other.keys()
+            if all(prims[k] == other[k] for k in shared_keys):
+                return True
+
+    return False
+
+
 def _merge_list_items_indexed(
-    source_items: list[Any], destination: list[Any], deduplicate: bool
-) -> None:
+    source_items: list[Any],
+    destination: list[Any],
+    deduplicate: bool,
+    cache: _DuplicateCache | None = None,
+) -> list[int]:
     """Merge source items into destination list using an inverted index.
 
     Args:
         source_items: List of items to merge into destination
         destination: Target list (modified in-place)
         deduplicate: When True, merges matching dict items
+        cache: Optional duplicate status cache of nested lists
+
+    Returns:
+        Indices of destination items that source items were merged into
     """
     # Build inverted index over destination's dict items
     dest_primitives: list[dict[str, Any] | None] = []
@@ -459,14 +669,19 @@ def _merge_list_items_indexed(
             except TypeError:
                 continue
 
+    merged: list[int] = []
     for source_item in source_items:
+        # Appended items also need an entry in dest_primitives, as candidate
+        # indices refer to positions in destination
         if not isinstance(source_item, dict):
             destination.append(source_item)
+            dest_primitives.append(None)
             continue
 
         src_prims = _extract_primitives(source_item)
         if not src_prims:
             destination.append(source_item)
+            dest_primitives.append(src_prims)
             continue
 
         # Collect candidate dest indices
@@ -474,7 +689,7 @@ def _merge_list_items_indexed(
         for k, v in src_prims.items():
             try:
                 bucket = index.get((k, v))
-                if bucket:
+                if bucket is not None:
                     candidate_set.update(bucket)
             except TypeError:
                 continue
@@ -489,9 +704,10 @@ def _merge_list_items_indexed(
             if not shared_keys:
                 continue
             if all(src_prims[k] == dp[k] for k in shared_keys):
-                merge_dict(source_item, destination[ci], deduplicate)
+                _merge_dict(source_item, destination[ci], deduplicate, cache)
                 # Update primitives cache after merge
                 dest_primitives[ci] = _extract_primitives(destination[ci])
+                merged.append(ci)
                 matched = True
                 break
 
@@ -505,6 +721,8 @@ def _merge_list_items_indexed(
                     index[(k, v)].append(new_idx)
                 except TypeError:
                     continue
+
+    return merged
 
 
 def merge_list_item(
@@ -587,6 +805,21 @@ def merge_dict(
         merge_dict(source, dest, deduplicate=True)
         # Result: {"list": [{"name": "a", "y": 2}, {"name": "a"}, {"name": "a"}]}
     """
+    return _merge_dict(source, destination, deduplicate, None)
+
+
+def _merge_dict(
+    source: dict[str, Any],
+    destination: dict[str, Any],
+    deduplicate: bool,
+    cache: _DuplicateCache | None,
+) -> dict[str, Any]:
+    """Implementation of merge_dict() with an optional duplicate status cache.
+
+    The cache is only valid if all changes to the destination lists are made
+    through this function with the same cache. Without a cache, the duplicate
+    status of destination lists is recomputed on every merge.
+    """
     if not source:
         return destination
     for key, value in source.items():
@@ -594,23 +827,37 @@ def merge_dict(
             destination[key] = value
         elif isinstance(value, dict):
             if isinstance(destination[key], dict):
-                merge_dict(value, destination[key], deduplicate)
+                _merge_dict(value, destination[key], deduplicate, cache)
         elif isinstance(value, list):
             if isinstance(destination[key], list):
                 if deduplicate:
                     # Skip empty lists
                     if not value or not destination[key]:
                         destination[key] += value
+                        if cache is not None and value:
+                            cache.invalidate(destination[key])
                     # Check if either source or destination list has duplicates
                     # If duplicates exist, skip merging to preserve them
-                    elif _has_duplicates_in_list(value) or _has_duplicates_in_list(
-                        destination[key]
+                    elif _has_duplicates_in_list(value) or (
+                        cache.has_duplicates(destination[key])
+                        if cache is not None
+                        else _has_duplicates_in_list(destination[key])
                     ):
                         # Concatenate without merging to preserve all duplicates
                         destination[key] += value
+                        if cache is not None:
+                            cache.set(destination[key], True)
                     else:
                         # No duplicates: merge matching items across files
-                        _merge_list_items_indexed(value, destination[key], deduplicate)
+                        merged = _merge_list_items_indexed(
+                            value, destination[key], deduplicate, cache
+                        )
+                        # Only merged items can have become duplicates of others
+                        if cache is not None:
+                            cache.set(
+                                destination[key],
+                                _has_duplicates_involving(destination[key], merged),
+                            )
                 else:
                     # Simple append (original behavior)
                     destination[key] += value
