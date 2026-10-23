@@ -295,6 +295,49 @@ class EnvTag(yaml.YAMLObject):
         return str(cls(node.value))
 
 
+class _DuplicateCache:
+    """Cache of the duplicate status of lists during a single load_yaml_files() run.
+
+    Entries are keyed by ``id()`` and hold a reference to the list, so that the
+    id cannot be reused by another list while the entry exists.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[int, tuple[list[Any], bool]] = {}
+
+    def has_duplicates(self, items: list[Any]) -> bool:
+        entry = self._entries.get(id(items))
+        if entry is not None:
+            return entry[1]
+        value = _has_duplicates_in_list(items)
+        self.set(items, value)
+        return value
+
+    def set(self, items: list[Any], value: bool) -> None:
+        self._entries[id(items)] = (items, value)
+
+    def invalidate(self, items: list[Any]) -> None:
+        self._entries.pop(id(items), None)
+
+
+def _contains_aliases(node: Any) -> bool:
+    """Check if the same dict or list object is reachable via multiple paths.
+
+    This is the case for YAML aliases (e.g. ``*anchor`` or ``<<: *anchor``).
+    Aliases cannot span multiple files, so checking each file is sufficient.
+    """
+    seen: set[int] = set()
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict | list):
+            if id(current) in seen:
+                return True
+            seen.add(id(current))
+            stack.extend(current.values() if isinstance(current, dict) else current)
+    return False
+
+
 def load_yaml_files(
     paths: list[Path],
     deduplicate: bool = True,
@@ -414,6 +457,11 @@ def load_yaml_files(
         _decrypt_vault_values(sorted(all_vault_values)) if all_vault_values else {}
     )
 
+    # Cache the duplicate status of merged lists across files, so that merging a
+    # file only checks the list items it changed instead of rescanning whole
+    # lists. Merging a file with YAML aliases could change a cached list via
+    # another reference, so the cache is disabled from then on.
+    cache = _DuplicateCache() if deduplicate else None
     result: dict[str, Any] = {}
     for (file_path, parsed, explicit), values in zip(
         documents, document_vault_values, strict=True
@@ -424,7 +472,10 @@ def load_yaml_files(
                 raise VaultError(f"{file_path}: {errors[0]}") from errors[0]
             logger.warning("Could not load file %s: %s", file_path, errors[0])
             continue
-        merge_dict(_resolve_vault_values(parsed, decrypted), result, deduplicate)
+        document = _resolve_vault_values(parsed, decrypted)
+        if cache is not None and _contains_aliases(document):
+            cache = None
+        _merge_dict(document, result, deduplicate, cache)
     return result
 
 
@@ -527,15 +578,78 @@ def _has_duplicates_in_list(items: list[Any]) -> bool:
     return False
 
 
+def _has_duplicates_involving(items: list[Any], indices: list[int]) -> bool:
+    """Check if any dict item at the given indices matches another dict item.
+
+    Uses the same matching logic as _has_duplicates_in_list(), but only checks
+    pairs involving the given items. If a list without duplicates had only the
+    items at these indices modified, only such pairs can have become duplicates.
+
+    Args:
+        items: List to check for duplicates
+        indices: Indices of the items to check against all other items
+
+    Returns:
+        True if any of the given items matches another dict item, False otherwise
+    """
+    if not indices:
+        return False
+
+    primitives_list: list[dict[str, Any] | None] = [
+        _extract_primitives(item) if isinstance(item, dict) else None for item in items
+    ]
+
+    # Build inverted index: (key, value) -> [indices]
+    index: dict[tuple[str, Any], list[int]] = defaultdict(list)
+    for i, prims in enumerate(primitives_list):
+        if prims is None:
+            continue
+        for k, v in prims.items():
+            try:
+                index[(k, v)].append(i)
+            except TypeError:
+                continue
+
+    for i in set(indices):
+        prims = primitives_list[i]
+        if prims is None:
+            continue
+        candidates: set[int] = set()
+        for k, v in prims.items():
+            try:
+                bucket = index.get((k, v))
+                if bucket is not None:
+                    candidates.update(bucket)
+            except TypeError:
+                continue
+        candidates.discard(i)
+        for j in candidates:
+            other = primitives_list[j]
+            if other is None:
+                continue
+            shared_keys = prims.keys() & other.keys()
+            if all(prims[k] == other[k] for k in shared_keys):
+                return True
+
+    return False
+
+
 def _merge_list_items_indexed(
-    source_items: list[Any], destination: list[Any], deduplicate: bool
-) -> None:
+    source_items: list[Any],
+    destination: list[Any],
+    deduplicate: bool,
+    cache: _DuplicateCache | None = None,
+) -> list[int]:
     """Merge source items into destination list using an inverted index.
 
     Args:
         source_items: List of items to merge into destination
         destination: Target list (modified in-place)
         deduplicate: When True, merges matching dict items
+        cache: Optional duplicate status cache of nested lists
+
+    Returns:
+        Indices of destination items that source items were merged into
     """
     # Build inverted index over destination's dict items
     dest_primitives: list[dict[str, Any] | None] = []
@@ -555,14 +669,19 @@ def _merge_list_items_indexed(
             except TypeError:
                 continue
 
+    merged: list[int] = []
     for source_item in source_items:
+        # Appended items also need an entry in dest_primitives, as candidate
+        # indices refer to positions in destination
         if not isinstance(source_item, dict):
             destination.append(source_item)
+            dest_primitives.append(None)
             continue
 
         src_prims = _extract_primitives(source_item)
         if not src_prims:
             destination.append(source_item)
+            dest_primitives.append(src_prims)
             continue
 
         # Collect candidate dest indices
@@ -585,9 +704,10 @@ def _merge_list_items_indexed(
             if not shared_keys:
                 continue
             if all(src_prims[k] == dp[k] for k in shared_keys):
-                merge_dict(source_item, destination[ci], deduplicate)
+                _merge_dict(source_item, destination[ci], deduplicate, cache)
                 # Update primitives cache after merge
                 dest_primitives[ci] = _extract_primitives(destination[ci])
+                merged.append(ci)
                 matched = True
                 break
 
@@ -601,6 +721,8 @@ def _merge_list_items_indexed(
                     index[(k, v)].append(new_idx)
                 except TypeError:
                     continue
+
+    return merged
 
 
 def merge_list_item(
@@ -683,6 +805,21 @@ def merge_dict(
         merge_dict(source, dest, deduplicate=True)
         # Result: {"list": [{"name": "a", "y": 2}, {"name": "a"}, {"name": "a"}]}
     """
+    return _merge_dict(source, destination, deduplicate, None)
+
+
+def _merge_dict(
+    source: dict[str, Any],
+    destination: dict[str, Any],
+    deduplicate: bool,
+    cache: _DuplicateCache | None,
+) -> dict[str, Any]:
+    """Implementation of merge_dict() with an optional duplicate status cache.
+
+    The cache is only valid if all changes to the destination lists are made
+    through this function with the same cache. Without a cache, the duplicate
+    status of destination lists is recomputed on every merge.
+    """
     if not source:
         return destination
     for key, value in source.items():
@@ -690,23 +827,37 @@ def merge_dict(
             destination[key] = value
         elif isinstance(value, dict):
             if isinstance(destination[key], dict):
-                merge_dict(value, destination[key], deduplicate)
+                _merge_dict(value, destination[key], deduplicate, cache)
         elif isinstance(value, list):
             if isinstance(destination[key], list):
                 if deduplicate:
                     # Skip empty lists
                     if not value or not destination[key]:
                         destination[key] += value
+                        if cache is not None and value:
+                            cache.invalidate(destination[key])
                     # Check if either source or destination list has duplicates
                     # If duplicates exist, skip merging to preserve them
-                    elif _has_duplicates_in_list(value) or _has_duplicates_in_list(
-                        destination[key]
+                    elif _has_duplicates_in_list(value) or (
+                        cache.has_duplicates(destination[key])
+                        if cache is not None
+                        else _has_duplicates_in_list(destination[key])
                     ):
                         # Concatenate without merging to preserve all duplicates
                         destination[key] += value
+                        if cache is not None:
+                            cache.set(destination[key], True)
                     else:
                         # No duplicates: merge matching items across files
-                        _merge_list_items_indexed(value, destination[key], deduplicate)
+                        merged = _merge_list_items_indexed(
+                            value, destination[key], deduplicate, cache
+                        )
+                        # Only merged items can have become duplicates of others
+                        if cache is not None:
+                            cache.set(
+                                destination[key],
+                                _has_duplicates_involving(destination[key], merged),
+                            )
                 else:
                     # Simple append (original behavior)
                     destination[key] += value

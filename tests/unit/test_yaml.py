@@ -3,6 +3,7 @@
 
 import filecmp
 import os
+import random
 import subprocess
 import sys
 from pathlib import Path
@@ -273,6 +274,130 @@ def test_load_yaml_files_mixed_dir(tmpdir: Path) -> None:
     Path(tmpdir, "valid.yaml").write_text("key: value\n")
     result = yaml.load_yaml_files([Path(tmpdir)])
     assert result == {"key": "value"}
+
+
+@pytest.mark.parametrize(
+    "appended_item",
+    [
+        pytest.param("abc", id="primitive_item"),
+        pytest.param({"map": {"elem1": "value1"}}, id="dict_item_without_primitives"),
+    ],
+)
+def test_merge_dict_after_appending_item_without_primitives(
+    appended_item: Any,
+) -> None:
+    source = {"list": [appended_item, {"name": "a", "x": 1}, {"name": "a", "x": 2}]}
+    destination = {"list": [{"name": "b"}]}
+    yaml.merge_dict(source, destination)
+    assert destination == {
+        "list": [
+            {"name": "b"},
+            appended_item,
+            {"name": "a", "x": 1},
+            {"name": "a", "x": 2},
+        ]
+    }
+
+
+def _write_files(tmpdir: Path, contents: list[str]) -> list[Path]:
+    paths = []
+    for i, content in enumerate(contents):
+        path = Path(tmpdir, f"file{i}.yaml")
+        path.write_text(content)
+        paths.append(path)
+    return paths
+
+
+def test_load_yaml_files_merge_introduces_duplicate(tmpdir: Path) -> None:
+    """A list that got a duplicate by merging items is concatenated afterwards."""
+    paths = _write_files(
+        tmpdir,
+        [
+            "list:\n  - name: x\n  - id: 1\n",
+            # Merges into the first item, which then matches the second item
+            "list:\n  - name: x\n    id: 1\n",
+            "list:\n  - id: 1\n    c: 3\n",
+        ],
+    )
+    result = yaml.load_yaml_files(paths)
+    assert result == {"list": [{"name": "x", "id": 1}, {"id": 1}, {"id": 1, "c": 3}]}
+
+
+def test_load_yaml_files_merge_introduces_duplicate_nested(tmpdir: Path) -> None:
+    """Same as above for a list nested in a list item."""
+    paths = _write_files(
+        tmpdir,
+        [
+            "tenants:\n  - name: t\n    list:\n      - name: x\n      - id: 1\n",
+            "tenants:\n  - name: t\n    list:\n      - name: x\n        id: 1\n",
+            "tenants:\n  - name: t\n    list:\n      - id: 1\n        c: 3\n",
+        ],
+    )
+    result = yaml.load_yaml_files(paths)
+    assert result == {
+        "tenants": [
+            {
+                "name": "t",
+                "list": [{"name": "x", "id": 1}, {"id": 1}, {"id": 1, "c": 3}],
+            }
+        ]
+    }
+
+
+def test_load_yaml_files_aliases(tmpdir: Path) -> None:
+    """Merging into an aliased item also changes the other lists containing it."""
+    paths = _write_files(
+        tmpdir,
+        [
+            "a:\n  - &item\n    name: n\nb:\n  - *item\n  - id: 1\n",
+            # Merges into b, then into the aliased item, which then matches b[1]
+            "b:\n  - name: z\na:\n  - name: n\n    id: 1\n",
+            "b:\n  - id: 1\n    c: 3\n",
+        ],
+    )
+    result = yaml.load_yaml_files(paths)
+    item = {"name": "n", "id": 1}
+    assert result == {
+        "a": [item],
+        "b": [item, {"id": 1}, {"name": "z"}, {"id": 1, "c": 3}],
+    }
+
+
+def _random_value(rng: random.Random, depth: int = 0) -> Any:
+    r = rng.random()
+    if depth > 3 or r < 0.3:
+        return rng.choice(["a", "b", 1, 2, None])
+    if r < 0.5:
+        return {rng.choice("xyz"): _random_value(rng, depth + 1) for _ in range(2)}
+    items: list[Any] = []
+    for _ in range(rng.randint(0, 3)):
+        if rng.random() < 0.15:
+            items.append(_random_value(rng, depth + 1))
+            continue
+        item: dict[str, Any] = {rng.choice(["name", "id"]): rng.choice("ab")}
+        if rng.random() < 0.5:
+            item["v"] = rng.choice([1, 2])
+        if rng.random() < 0.5:
+            item["l"] = _random_value(rng, depth + 1)
+        items.append(item)
+    return items
+
+
+@pytest.mark.parametrize("seed", range(50))
+def test_load_yaml_files_matches_sequential_merge_dict(tmpdir: Path, seed: int) -> None:
+    """Merging many files gives the same result as merge_dict() file by file."""
+    rng = random.Random(seed)
+    paths = []
+    for i in range(6):
+        path = Path(tmpdir, f"file{i}.yaml")
+        yaml.write_yaml_file(
+            {"root": {"list": _random_value(rng), "map": _random_value(rng)}}, path
+        )
+        paths.append(path)
+    expected: dict[str, Any] = {}
+    for path in paths:
+        yaml.merge_dict(yaml.load_yaml_files([path]), expected)
+    assert yaml.load_yaml_files(paths) == expected
 
 
 # Vault value encrypted with the content of the former nac_yaml/ansible_vault.py as password,

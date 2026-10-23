@@ -6,6 +6,8 @@
 - Add optional `vault` extra (`pip install nac-yaml[vault]`)
 - Remove the unused `nac_yaml/ansible_vault.py` vault password script
 - Fix `load_yaml_files()` failing on empty or comment-only YAML files; these are now skipped, and files with a non-mapping root (e.g. a list) are skipped with a warning
+- Improve `load_yaml_files()` performance for data models split across many files by caching the duplicate status of merged lists instead of rescanning them for every file; the cache is disabled once a file with YAML aliases is merged
+- Fix list merging failing with `IndexError` or comparing source items against the wrong destination item after a file appended non-dict items or dict items without primitive values to the same list
 
 ## 2.0.0
 
