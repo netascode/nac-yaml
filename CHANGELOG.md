@@ -1,4 +1,4 @@
-## Unreleased
+## 2.1.0
 
 - Fix `!vault` decryption ignoring `ANSIBLE_VAULT_PASSWORD`; values are now decrypted with the configured vault password. Values encrypted with the content of `ansible_vault.py` as password (e.g. copied from test fixtures) are no longer decrypted
 - Decrypt all `!vault` values of all files in a single batch in a separate process; ansible-core is used from the current environment or from the `ansible-vault` command on `PATH`
