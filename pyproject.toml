@@ -1,6 +1,6 @@
 [project]
 name = "nac-yaml"
-version = "2.2.0"
+version = "2.2.1"
 description = "A Python library with common YAML utility functions supporting 'Network as Code'."
 license = { text = "MPL-2.0" }
 readme = "README.md"
@@ -30,8 +30,9 @@ dependencies = [
     "ruamel.yaml>=0.18.15",
     # libyaml based C parser, used for typ="safe". Restricted to the platforms
     # ruamel.yaml.clib publishes wheels for, so that installing never needs a C
-    # compiler; everywhere else the pure Python parser is used.
-    "ruamel.yaml.clib>=0.2.15; platform_python_implementation == 'CPython' and python_version < '3.15' and ((sys_platform == 'linux' and platform_machine in 'x86_64 aarch64 i686') or (sys_platform == 'darwin' and platform_machine in 'x86_64 arm64') or (sys_platform == 'win32' and platform_machine in 'AMD64 x86'))",
+    # compiler; everywhere else the pure Python parser is used. 0.2.14 is
+    # allowed because genie-libs-sdk (pyATS, used by nac-test) requires <0.2.15.
+    "ruamel.yaml.clib>=0.2.14; platform_python_implementation == 'CPython' and python_version < '3.15' and ((sys_platform == 'linux' and platform_machine in 'x86_64 aarch64 i686') or (sys_platform == 'darwin' and platform_machine in 'x86_64 arm64') or (sys_platform == 'win32' and platform_machine in 'AMD64 x86'))",
 ]
 
 [project.urls]

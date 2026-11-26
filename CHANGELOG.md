@@ -1,3 +1,7 @@
+## Unreleased
+
+- Allow `ruamel.yaml.clib` 0.2.14
+
 ## 2.2.0
 
 - Parse `typ="safe"` documents several times faster with the libyaml based C parser: `ruamel.yaml.clib` is now a dependency on CPython up to 3.14 on the platforms it publishes wheels for (ruamel.yaml 0.19 no longer installs it). Elsewhere, or if the extension can't be imported, the pure Python parser is used. Results and errors are the same with both parsers: documents the C parser fails on are parsed again with the pure Python parser, and documents it would parse differently (containing a tab or a `%YAML` directive) use the pure Python parser
