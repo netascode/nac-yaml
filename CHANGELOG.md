@@ -1,3 +1,12 @@
+## 2.2.0 (unreleased)
+
+- Add `merge_documents()` to merge already parsed documents like `load_yaml_files()`, without modifying them, and record where each merged value comes from (`MergeResult.origins`) and which values were discarded because of a type mismatch (`MergeResult.dropped`), including mappings or lists replaced by a later scalar
+- Add `parse_yaml()` to parse a YAML document like `load_yaml_files()` parses each file, without decrypting `!vault` values, raising `YamlRootError` for a non-mapping root
+- Add `find_yaml_files()` to return the files `load_yaml_files()` reads, in merge order
+- Add `node_position()` to return the line and column of a key or list item in a round-trip document
+- `!vault` placeholders (`VaultTag`) now compare equal and hash by their encrypted content
+- Files found in directories are now merged in sorted order of their relative path, the order of Terraform's `fileset()`, instead of file system order. This changes the order of list items merged from several files, and which file wins a scalar defined in several files; previously both depended on the file system
+
 ## 2.1.0
 
 - Fix `!vault` decryption ignoring `ANSIBLE_VAULT_PASSWORD`; values are now decrypted with the configured vault password. Values encrypted with the content of `ansible_vault.py` as password (e.g. copied from test fixtures) are no longer decrypted

@@ -28,6 +28,19 @@ data_safe = load_yaml_files([
 
 Note: when `typ` is not round-trip (e.g. `"safe"`), formatting features (quotes/comments/style) are not preserved.
 
+Files are merged in the given order; the files of a directory are sorted by relative path, like Terraform's `fileset()` (e.g. `a.yaml`, `a/b.yaml`, `b.yaml`). The order decides the order of list items and, for a value defined in several files, which one is kept (the last).
+
+### Merge parsed documents and find where values come from
+
+For tools that keep documents in memory, such as editors, `merge_documents()` merges parsed documents like `load_yaml_files()` without modifying them, and records where each merged value comes from. `parse_yaml()` parses a document like `load_yaml_files()` does, `find_yaml_files()` returns the files it reads in merge order, and `node_position()` turns a path into a line and column. See the docstrings for details.
+
+```python
+from nac_yaml.yaml import merge_documents, parse_yaml
+
+result = merge_documents([("a.yaml", parse_yaml(text_a)), ("b.yaml", parse_yaml(text_b))])
+result.origins.get(("nxos", "devices", 0, "name"))  # [Origin(source='a.yaml', path=('nxos', 'devices', 0, 'name'))]
+```
+
 ### Ansible Vault encrypted values
 
 Values encrypted with [Ansible Vault](https://docs.ansible.com/ansible/latest/vault_guide/index.html) can be used with the `!vault` tag:

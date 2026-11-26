@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ruamel.yaml.error import MarkedYAMLError
 
 from nac_yaml import yaml
 
@@ -274,6 +275,19 @@ def test_load_yaml_files_mixed_dir(tmpdir: Path) -> None:
     Path(tmpdir, "valid.yaml").write_text("key: value\n")
     result = yaml.load_yaml_files([Path(tmpdir)])
     assert result == {"key": "value"}
+
+
+def test_load_yaml_files_invalid_file(
+    tmpdir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Invalid YAML is raised for explicit files and skipped in directories."""
+    invalid = Path(tmpdir, "invalid.yaml")
+    invalid.write_text("key: [\n")
+    Path(tmpdir, "valid.yaml").write_text("key: value\n")
+    with pytest.raises(MarkedYAMLError):
+        yaml.load_yaml_files([invalid])
+    assert yaml.load_yaml_files([Path(tmpdir)]) == {"key": "value"}
+    assert f"Could not load file {invalid}" in caplog.text
 
 
 @pytest.mark.parametrize(
