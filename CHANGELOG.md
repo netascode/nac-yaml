@@ -1,5 +1,6 @@
-## 2.2.0 (unreleased)
+## Unreleased
 
+- Drop support for Python 3.10 (end of life); Python 3.11 or later is now required
 - Add `merge_documents()` to merge already parsed documents like `load_yaml_files()`, without modifying them, and record where each merged value comes from (`MergeResult.origins`) and which values were discarded because of a type mismatch (`MergeResult.dropped`), including mappings or lists replaced by a later scalar
 - Add `parse_yaml()` to parse a YAML document like `load_yaml_files()` parses each file, without decrypting `!vault` values, raising `YamlRootError` for a non-mapping root
 - Add `find_yaml_files()` to return the files `load_yaml_files()` reads, in merge order

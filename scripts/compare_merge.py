@@ -3,7 +3,7 @@
 # Copyright (c) 2025 Daniel Schmidt
 
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["ruamel.yaml"]
 # ///
 """Compare YAML merge output between nac-yaml v1.1.1 and v2.0.0.
@@ -20,7 +20,7 @@ environments and reports any differences so users can verify their data
 produces identical output before upgrading.
 
 Prerequisites:
-  - Python 3.10+
+  - Python 3.11+
   - uv (https://docs.astral.sh/uv/)
     Install: curl -LsSf https://astral.sh/uv/install.sh | sh
 
@@ -991,7 +991,7 @@ def main() -> int:
             f"Compare nac-yaml merge output between v{OLD_VERSION} and v{NEW_VERSION}."
         ),
         epilog=(
-            "Exit codes: 0 = identical, 1 = differences found, 2 = error.\nRequires: Python 3.10+, uv"
+            "Exit codes: 0 = identical, 1 = differences found, 2 = error.\nRequires: Python 3.11+, uv"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
