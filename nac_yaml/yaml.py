@@ -16,8 +16,18 @@ from pathlib import Path
 from typing import Any
 
 from ruamel import yaml
+from ruamel.yaml import main as _ruamel_main
 
 logger = logging.getLogger(__name__)
+
+# Environment variable forcing the pure Python parser, e.g. NAC_YAML_PURE=1
+PURE_ENV = "NAC_YAML_PURE"
+
+# Documents containing these are parsed with the pure Python parser, as the C
+# parser would parse them differently instead of failing: libyaml accepts tabs
+# the pure Python scanner rejects (e.g. "a:\tb" or "a: b\tc"), and ignores
+# %YAML 1.1 directives. Both are rare, so few documents miss the C parser.
+_C_PARSER_DIVERGES = ("\t", "%YAML")
 
 VAULT_HELPER_PATH = Path(__file__).with_name("_vault_helper.py")
 VAULT_HELPER_TIMEOUT = 120
@@ -595,18 +605,71 @@ def _track_replaced(track: _Track, key: Any) -> None:
     origins.dropped += [Dropped(origin, path, replaced=True) for origin in replaced]
 
 
-def _yaml_parser(typ: str | None) -> yaml.YAML:
-    """Create a ruamel.yaml parser with the !vault and !env tags registered."""
-    y = yaml.YAML(typ=typ) if typ is not None else yaml.YAML()
+def _force_pure() -> bool:
+    """Return True if the pure Python parser is forced via NAC_YAML_PURE."""
+    return os.environ.get(PURE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _yaml_parser(typ: str | None, pure: bool = False) -> yaml.YAML:
+    """Create a ruamel.yaml parser with the !vault and !env tags registered.
+
+    ruamel.yaml uses the libyaml based C parser for ``typ="safe"`` if the
+    ``ruamel.yaml.clib`` extension can be imported, and the pure Python parser
+    otherwise. The round-trip parser is always pure Python.
+    """
+    y = yaml.YAML(typ=typ, pure=pure or _force_pure())
     y.preserve_quotes = True
     y.register_class(VaultTag)
     y.register_class(EnvTag)
     return y
 
 
-def _parse(y: yaml.YAML, text: str, source: str) -> dict[str, Any] | None:
+def _uses_c_parser(y: yaml.YAML) -> bool:
+    """Return True if the parser uses the C extension."""
+    c_parser = _ruamel_main.CParser
+    return c_parser is not None and y.Parser is c_parser
+
+
+def yaml_backend(typ: str | None = None) -> str:
+    """Return the parser backend parse_yaml() and load_yaml_files() use for a typ.
+
+    Args:
+        typ: ruamel.yaml parser type, see load_yaml_files()
+
+    Returns:
+        ``"c"`` for the libyaml based C parser of ``ruamel.yaml.clib``, which
+        is used for ``typ="safe"`` where available, or ``"python"`` for the
+        pure Python parser: always for round-trip, without the extension or
+        with the ``NAC_YAML_PURE`` environment variable set
+    """
+    return "c" if _uses_c_parser(_yaml_parser(typ)) else "python"
+
+
+def _load(y: yaml.YAML, text: str, source: str, typ: str | None) -> Any:
+    """Load a YAML document, with the C parser where it parses like pure Python.
+
+    Documents the C parser would parse differently go to the pure Python
+    parser. If the C parser fails, the document is parsed again with the pure
+    Python parser: its error, with the offending line, is raised for invalid
+    YAML, and its result is used should only the C parser fail.
+    """
+    if not _uses_c_parser(y):
+        return y.load(text)
+    if any(marker in text for marker in _C_PARSER_DIVERGES):
+        logger.debug("Using pure Python parser for %s", source)
+        return _yaml_parser(typ, pure=True).load(text)
+    try:
+        return y.load(text)
+    except Exception as e:
+        logger.debug("C parser failed for %s, using pure Python parser: %s", source, e)
+        return _yaml_parser(typ, pure=True).load(text)
+
+
+def _parse(
+    y: yaml.YAML, text: str, source: str, typ: str | None
+) -> dict[str, Any] | None:
     """Parse a YAML document with the given parser, see parse_yaml()."""
-    parsed = y.load(text)
+    parsed = _load(y, text, source, typ)
     if parsed is None:
         return None
     if not isinstance(parsed, dict):
@@ -638,7 +701,7 @@ def parse_yaml(
             error's ``problem_mark`` holds the line and column
         YamlRootError: If the root of the document is not a mapping
     """
-    return _parse(_yaml_parser(typ), text, source)
+    return _parse(_yaml_parser(typ), text, source, typ)
 
 
 def find_yaml_files(paths: Sequence[Path | str]) -> list[tuple[Path, bool]]:
@@ -695,7 +758,8 @@ def load_yaml_files(
                     When False, simply concatenates all list items.
         typ: Optional ruamel.yaml parser type passed to ``ruamel.yaml.YAML(typ=...)``.
              Use ``"safe"`` to load native Python types (dict/list) instead of round-trip
-             containers.
+             containers. ``"safe"`` is also several times faster, as it uses the
+             libyaml based C parser where available, see yaml_backend().
 
              Caveat: when ``typ`` is not round-trip (e.g. ``"safe"``), formatting-related
              options like ``preserve_quotes`` do not apply and comments/quoting/style are not
@@ -757,7 +821,7 @@ def load_yaml_files(
         with open(file_path) as file:
             text = file.read()
         try:
-            parsed = _parse(y, text, str(file_path))
+            parsed = _parse(y, text, str(file_path), typ)
         except YamlRootError as e:
             logger.warning(
                 "Skipping file with non-mapping root (%s): %s",
@@ -1395,6 +1459,8 @@ def write_yaml_file(data: dict[str, Any], path: Path) -> None:
     """
     try:
         with open(path, "w") as fh:
+            # The round-trip emitter is pure Python; the C emitter would ignore
+            # the sequence indent and sort the keys
             y = yaml.YAML()
             y.explicit_start = True
             y.default_flow_style = False

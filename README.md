@@ -30,6 +30,14 @@ Note: when `typ` is not round-trip (e.g. `"safe"`), formatting features (quotes/
 
 Files are merged in the given order; the files of a directory are sorted by relative path, like Terraform's `fileset()` (e.g. `a.yaml`, `a/b.yaml`, `b.yaml`). The order decides the order of list items and, for a value defined in several files, which one is kept (the last).
 
+### Performance
+
+With `typ="safe"`, documents are parsed with the libyaml based C parser of `ruamel.yaml.clib`, which is several times faster than the pure Python parser. The round-trip loader (the default) is always pure Python. `ruamel.yaml.clib` is installed on CPython up to 3.14 on the platforms it publishes wheels for: Linux (glibc and musl) x86_64, aarch64 and i686, macOS x86_64 and arm64, and Windows x86 and AMD64. Elsewhere, and if the extension can't be imported, the pure Python parser is used.
+
+Results don't depend on the parser: if the C parser fails, the document is parsed again with the pure Python parser, whose error includes the offending line. Documents the C parser would parse differently (those containing a tab or a `%YAML` directive) always use the pure Python parser.
+
+`yaml_backend(typ)` returns the parser in use (`"c"` or `"python"`). Set `NAC_YAML_PURE=1` to always use the pure Python parser.
+
 ### Merge parsed documents and find where values come from
 
 For tools that keep documents in memory, such as editors, `merge_documents()` merges parsed documents like `load_yaml_files()` without modifying them, and records where each merged value comes from. `parse_yaml()` parses a document like `load_yaml_files()` does, `find_yaml_files()` returns the files it reads in merge order, and `node_position()` turns a path into a line and column. See the docstrings for details.

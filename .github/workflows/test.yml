@@ -95,23 +95,75 @@ jobs:
 
       - name: Test
         shell: bash
+        env:
+          # ruamel.yaml.clib has wheels for all of these, so the C parser must load
+          NAC_YAML_EXPECT_C: "1"
         run: |
           uv sync --extra dev
           uv run pytest
+
+  test-variants:
+    name: Tests (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - name: Linux ARM64, C parser
+            os: ubuntu-24.04-arm
+            python: "3.14"
+            expect_c: "1"
+          - name: Windows ARM64, no C wheel
+            os: windows-11-arm
+            python: "3.14"
+            expect_c: "0"
+          - name: pure Python, C extension removed
+            os: ubuntu-latest
+            python: "3.14"
+            expect_c: "0"
+            uninstall_c: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Python Setup
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
+        with:
+          enable-cache: true
+
+      - name: Test
+        shell: bash
+        env:
+          NAC_YAML_EXPECT_C: ${{ matrix.expect_c }}
+          UNINSTALL_C: ${{ matrix.uninstall_c }}
+        run: |
+          uv sync --extra dev
+          if [ "$UNINSTALL_C" == "true" ]; then
+            uv pip uninstall ruamel.yaml.clib
+          fi
+          # --no-sync keeps uv from reinstalling the removed extension
+          uv run --no-sync pytest
 
   notification:
     name: Notification
     # github.workflow is the caller's name when run via workflow_call, so this
     # skips the release run (reusable workflows don't receive the Webex secrets)
     if: always() && github.event_name != 'pull_request' && github.workflow == 'Tests' && github.actor != 'dependabot[bot]'
-    needs: [security, lint, test]
+    needs: [security, lint, test, test-variants]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
     steps:
       - name: Check Job Success
         run: |
-          if [ ${{ needs.security.result }} == 'success' ] && [ ${{ needs.lint.result }} == 'success' ] && [ ${{ needs.test.result }} == 'success' ]; then
+          if [ ${{ needs.security.result }} == 'success' ] && [ ${{ needs.lint.result }} == 'success' ] && [ ${{ needs.test.result }} == 'success' ] && [ ${{ needs.test-variants.result }} == 'success' ]; then
             echo "All jobs succeeded"
             echo "JOB_SUCCESS=success" >> $GITHUB_ENV
           else
