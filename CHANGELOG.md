@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Parse `typ="safe"` documents several times faster with the libyaml based C parser: `ruamel.yaml.clib` is now a dependency on CPython up to 3.14 on the platforms it publishes wheels for (ruamel.yaml 0.19 no longer installs it). Elsewhere, or if the extension can't be imported, the pure Python parser is used. Results and errors are the same with both parsers: documents the C parser fails on are parsed again with the pure Python parser, and documents it would parse differently (containing a tab or a `%YAML` directive) use the pure Python parser
+- Add `yaml_backend()` to return the parser used for a `typ` (`"c"` or `"python"`), and the `NAC_YAML_PURE` environment variable to force the pure Python parser
 - Drop support for Python 3.10 (end of life); Python 3.11 or later is now required
 - Add `merge_documents()` to merge already parsed documents like `load_yaml_files()`, without modifying them, and record where each merged value comes from (`MergeResult.origins`) and which values were discarded because of a type mismatch (`MergeResult.dropped`), including mappings or lists replaced by a later scalar
 - Add `parse_yaml()` to parse a YAML document like `load_yaml_files()` parses each file, without decrypting `!vault` values, raising `YamlRootError` for a non-mapping root
